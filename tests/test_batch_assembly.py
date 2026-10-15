@@ -63,8 +63,10 @@ def _hashes(results):
             for result in results for path in (_wire(result), _former(result))}
 
 
-def test_nominal_keys_match_reference_dimensions_and_have_no_antenna_slot(design):
+@pytest.mark.parametrize('clearance_mm', [.1, .3, .5])
+def test_nominal_keys_honor_printing_clearance_and_have_no_antenna_slot(design, clearance_mm):
     batch, configs, _ = design
+    batch.fit_clearance = clearance_mm / 1000
     keys = assembly.nominal_key_pairs(batch, configs)
     assert [(key['inner_axis'], key['outer_axis'], key['angle_deg']) for key in keys] == [
         ('z', 'x', 202.5), ('x', 'y', 180)]
@@ -74,9 +76,9 @@ def test_nominal_keys_match_reference_dimensions_and_have_no_antenna_slot(design
         tangent = np.array([-np.sin(np.deg2rad(key['angle_deg'])),
                             np.cos(np.deg2rad(key['angle_deg'])), 0])
         assert np.ptp(male.vertices @ tangent) == pytest.approx(4)
-        assert np.ptp(female.vertices @ tangent) == pytest.approx(4.2)
+        assert np.ptp(female.vertices @ tangent) == pytest.approx(4 + 2 * clearance_mm)
         assert male.bounds[:, 2] == pytest.approx([-85, -81])
-        assert female.bounds[:, 2] == pytest.approx([-85.1, -80.9])
+        assert female.bounds[:, 2] == pytest.approx([-85 - clearance_mm, -81 + clearance_mm])
     batch.include_keys = False
     assert assembly.nominal_key_pairs(batch, configs) == []
 

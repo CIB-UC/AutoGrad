@@ -27,13 +27,14 @@ def app():
 
 
 def test_batch_replaces_standalone_and_preserves_physical_axes(app):
-    from halbach_coils.coilgen.batch import build_layer_configs
+    from halbach_coils.coilgen.batch import BatchConfig, build_layer_configs
 
     assert not hasattr(app, 'standalone_panel')
     assert [app.notebook.tab(tab, 'text') for tab in app.notebook.tabs()] == [
         'Pipeline', 'Batch design', 'Tikhonov sweep']
     app.b0_var.set('-x')
     batch = app.batch_panel._build_cfg()
+    assert batch.fit_clearance == BatchConfig().fit_clearance == .0003
     layers = build_layer_configs(batch)
     assert [cfg.gradient_axis for cfg in layers] == ['z', 'x', 'y']
     assert all(cfg.b0_direction == '-x' for cfg in layers)
@@ -43,6 +44,7 @@ def test_batch_replaces_standalone_and_preserves_physical_axes(app):
     app._refresh_language()
     assert app.notebook.tab(app.batch_panel, 'text') == 'Diseño en lote'
     assert 'Radio máximo del molde' in app.batch_panel.total_radius_label.cget('text')
+    assert 'Holgura del encaje: 0.30 mm' in app.batch_panel.preview_notice.cget('text')
 
 
 def test_batch_converts_mm_and_keeps_per_axis_values_when_reordered(app):

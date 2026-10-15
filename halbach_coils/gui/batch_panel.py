@@ -130,7 +130,7 @@ class BatchPanel(ttk.Frame):
         self.key_dimensions.pack(fill='x')
         self.key_length_var = self._entry(self.key_dimensions, 0, 'Key axial length [mm]:', '4')
         self.key_width_var = self._entry(self.key_dimensions, 1, 'Key width [mm]:', '4')
-        self.fit_clearance_var = self._entry(self.key_dimensions, 2, 'Key clearance per side [mm]:', '0.1')
+        self.fit_clearance_var = self._entry(self.key_dimensions, 2, 'Key clearance per side [mm]:', '0.3')
         ttk.Label(keys, text='Keys share the physical X/Y/Z frame. The gradients are never rotated to fit.',
                   wraplength=430, justify='left').pack(fill='x', pady=(4, 0))
 
@@ -193,6 +193,7 @@ class BatchPanel(ttk.Frame):
             (self._entries[str(self.radial_gap_var)], 'Gap = inner radius of the outer gradient minus outer radius of the inner gradient, including cable and groove. The crossing gap within each gradient is separate.'),
             (self._entries[str(self.a_var)], 'A multiplies each cable diameter to set the radial groove height. B sets the tangential groove width.'),
             (self._entries[str(self.b_var)], 'A multiplies each cable diameter to set the radial groove height. B sets the tangential groove width.'),
+            (self._entries[str(self.fit_clearance_var)], 'Extra space on each side of the key and at the axial stop. With 0.3 mm, a 4 mm key fits a 4.6 mm wide slot with a 0.3 mm axial gap. Adjust for your printer and material.'),
         ]
         for widgets in self._layer_rows.values():
             tips.append((widgets[2], 'Radial gap between cable crossings within this gradient. It contributes to this mold thickness.'))
@@ -242,7 +243,7 @@ class BatchPanel(ttk.Frame):
         key_values = ((float(self.key_length_var.get()) / 1000,
                        float(self.key_width_var.get()) / 1000,
                        float(self.fit_clearance_var.get()) / 1000)
-                      if self.keys_var.get() else (.004, .004, .0001))
+                      if self.keys_var.get() else (.004, .004, .0003))
         cfg = BatchConfig(
             base=self._base_config(),
             anchor_radius=float(self.anchor_radius_var.get()) / 1000,
@@ -417,6 +418,9 @@ class BatchPanel(ttk.Frame):
         notice += '\n' + self.root.tr('Separation between complete gradients: {gap:.2f} mm.',
                                      gap=batch.radial_gap * 1000)
         if batch.include_keys:
+            notice += '\n' + self.root.tr(
+                'Key clearance: {clearance:.2f} mm per side and at the axial stop.',
+                clearance=batch.fit_clearance * 1000)
             notice += '\n' + self.root.tr(
                 'Final key positions verified against the conductors.' if actual_keys else
                 'Key positions are preliminary; the final design selects a clear location for each key.')

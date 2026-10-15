@@ -40,7 +40,7 @@ class BatchConfig:
     include_keys: bool = True
     key_length: float = 0.004
     key_width: float = 0.004
-    fit_clearance: float = 0.0001
+    fit_clearance: float = 0.0003
 
 
 @dataclass(frozen=True)

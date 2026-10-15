@@ -88,6 +88,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Key axial length [mm]:": "Largo axial del encaje [mm]:",
         "Key width [mm]:": "Ancho del encaje [mm]:",
         "Key clearance per side [mm]:": "Holgura del encaje por lado [mm]:",
+        "Extra space on each side of the key and at the axial stop. With 0.3 mm, a 4 mm key fits a 4.6 mm wide slot with a 0.3 mm axial gap. Adjust for your printer and material.":
+            "Espacio adicional a cada lado de la pestaña y en el tope axial. Con 0,3 mm, una pestaña de 4 mm entra en una ranura de 4,6 mm de ancho con 0,3 mm de margen axial. Ajusta según tu impresora y material.",
+        "Key clearance: {clearance:.2f} mm per side and at the axial stop.":
+            "Holgura del encaje: {clearance:.2f} mm por lado y en el tope axial.",
         "Keys share the physical X/Y/Z frame. The gradients are never rotated to fit.":
             "Los encajes comparten la referencia física X/Y/Z. Los gradientes conservan su orientación al ensamblarse.",
         "Design Gx, Gy and Gz": "Diseñar Gx, Gy y Gz",

@@ -47,7 +47,13 @@ los sólidos nuevos se generan desde los resultados actuales.
 
 Cada pareja de moldes tiene una pestaña en el interior y una ranura en el
 exterior, abiertas desde −Z. Ancho y longitud iniciales: 4 mm. La ranura
-tiene 0,1 mm adicional por cada lado tangencial y 0,1 mm en el tope axial.
+tiene por defecto 0,3 mm adicionales por cada lado tangencial y 0,3 mm en el
+tope axial: para una pestaña de 4 mm, el ancho de la ranura es 4,6 mm y su
+largo útil 4,3 mm. **Holgura del encaje por lado** permite ajustar ese valor;
+la vista previa y los STL usan la misma holgura. El valor inicial depende de
+la precisión de la impresora y del material: conviene comprobarlo en una
+muestra pequeña antes de imprimir el conjunto completo
+([guía de tolerancias de Prusa](https://help.prusa3d.com/article/modeling-with-3d-printing-in-mind_164135)).
 El extremo de la pestaña sigue el radio externo del receptor. Las posiciones
 preferidas son 202,5° y 180°, medidas de +X hacia +Y. Si una posición corta
 un conductor o interfiere con el otro encaje, se buscan otras posiciones sin

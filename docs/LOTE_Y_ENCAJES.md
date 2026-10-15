@@ -150,3 +150,22 @@ tres moldes cerrados, encajes validados y FastHenry correcto en los tres ejes.
 Los resultados están en `halbach_coils/resultados/verificacion_lote_gap_20261015/`.
 La suite final pasó 343 pruebas. Se volvieron a comprobar los 18 chequeos
 del conjunto exportado usando el cable circular real y los moldes con encajes.
+
+## Corrección de la exportación del conjunto
+
+El lote con radio interior completo 30 mm, gap 2 mm, cable 2 mm y ROI 20 mm
+terminaba los tres diseños individuales, pero fallaba al exportar los encajes.
+La conversión a CAD acepta ahora los buffers de vértices de solo lectura que
+devuelve `to_mesh64()`, creando memoria editable cuando hace falta.
+
+Además, se reparan las caras que se vuelven collineales únicamente al redondear
+las coordenadas al float32 del STL. Se divide la cara vecina usando el vértice
+existente antes de retirar la cara degenerada, conservando las coordenadas
+redondeadas y evitando abrir una fisura. Se mantienen las comprobaciones de
+cierre, orientación, caras degeneradas e interferencia de los archivos finales.
+
+Con los archivos reales de ese lote se completó únicamente el conjunto, sin
+recalcular bobinas ni FastHenry: los 81 archivos individuales conservaron su
+SHA-256 y el conjunto pasó sus 18 comprobaciones. La suite completa pasó
+348 pruebas, incluidas las regresiones de buffers de solo lectura y de caras
+que se vuelven collineales al exportar STL.

@@ -40,9 +40,10 @@ VOXEL_CROP_PAD = 0.005  # [m] margin around shell bbox for voxel pass
 # ---------------------------------------------------------------------------
 
 def manifold_from_trimesh(tm):
+    # Mesh64 also requires writable buffers; to_mesh64() exposes read-only arrays.
     mesh = m3d.Mesh64(
-        vert_properties=np.asarray(tm.vertices, dtype=np.float64),
-        tri_verts=np.asarray(tm.faces, dtype=np.uint64),
+        vert_properties=np.require(tm.vertices, dtype=np.float64, requirements=['C', 'W']),
+        tri_verts=np.require(tm.faces, dtype=np.uint64, requirements=['C', 'W']),
     )
     return m3d.Manifold(mesh)
 
@@ -142,6 +143,10 @@ def _retessellate_collinear_faces(mesh):
 def _serialized_shell(mesh):
     serialized = trimesh.load_mesh(BytesIO(mesh.export(file_type='stl')), file_type='stl')
     _collapse_stl_precision_edges(serialized)
+    # Rounding can make a long, thin face collinear even when all of its
+    # original edges/faces were valid. Preserve its neighboring topology
+    # before dropping it; deleting the face alone would open a slit.
+    _retessellate_collinear_faces(serialized)
     serialized.update_faces(serialized.nondegenerate_faces() & serialized.unique_faces())
     serialized.remove_unreferenced_vertices()
     payload = serialized.export(file_type='stl')

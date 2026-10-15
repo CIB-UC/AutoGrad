@@ -130,8 +130,9 @@ def _solid(mesh, label, *, one_part=False):
     if (not len(mesh.faces) or not np.all(np.isfinite(mesh.vertices))
             or not mesh.is_watertight or not mesh.is_winding_consistent or mesh.volume <= 0):
         raise RuntimeError(f'{label}: mesh is not a closed, consistently oriented solid.')
-    solid = m3d.Manifold(m3d.Mesh64(np.asarray(mesh.vertices, dtype=np.float64),
-                                   np.asarray(mesh.faces, dtype=np.uint64)))
+    solid = m3d.Manifold(m3d.Mesh64(
+        np.require(mesh.vertices, dtype=np.float64, requirements=['C', 'W']),
+        np.require(mesh.faces, dtype=np.uint64, requirements=['C', 'W'])))
     if solid.status() != m3d.Error.NoError or solid.is_empty() or solid.volume() <= 0:
         raise RuntimeError(f'{label}: invalid CAD solid ({solid.status()}).')
     if one_part and len(solid.decompose()) != 1:

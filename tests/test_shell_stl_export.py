@@ -85,3 +85,25 @@ def test_collinear_t_junction_retessellates_neighbor_without_filling_a_hole(tmp_
     assert np.all(result.nondegenerate_faces())
     assert result.volume == pytest.approx(base.volume)
     np.testing.assert_allclose(result.bounds, base.bounds)
+
+
+def test_stl_rounding_collinearizes_a_face_with_long_edges(tmp_path):
+    base = trimesh.creation.box(extents=[100, 100, 100])
+    a, b, c = base.faces[0]
+    extra = len(base.vertices)
+    # Every input face is valid. Float32 erases the perpendicular offset,
+    # making this face collinear without collapsing any of its long edges.
+    point = (base.vertices[a] + (base.vertices[b] - base.vertices[a]) * .3
+             + (base.vertices[c] - base.vertices[a]) * 1e-9)
+    mesh = trimesh.Trimesh(
+        np.vstack([base.vertices, point]),
+        np.vstack([base.faces[1:], [a, b, extra], [b, c, extra], [c, a, extra]]),
+        process=False)
+    assert mesh.is_watertight and np.all(mesh.nondegenerate_faces())
+    rounded = trimesh.load_mesh(BytesIO(mesh.export(file_type='stl')), file_type='stl')
+    assert np.count_nonzero(~rounded.nondegenerate_faces()) == 1
+    result = export_validated_shell_stl(mesh, tmp_path / 'rounding_sliver.stl')
+    assert result.is_watertight and result.is_winding_consistent
+    assert np.all(result.nondegenerate_faces())
+    assert result.volume == pytest.approx(base.volume)
+    np.testing.assert_allclose(result.bounds, base.bounds)

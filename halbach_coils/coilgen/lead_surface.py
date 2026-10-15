@@ -397,8 +397,8 @@ def attach(open_mesh, leads):
 def manifold(mesh):
     """Perform booleans in mm, preserving precision for small grooves."""
     result = m3d.Manifold(m3d.Mesh64(
-        vert_properties=np.asarray(mesh.vertices*1000, dtype=np.float64),
-        tri_verts=np.asarray(mesh.faces, dtype=np.uint64)))
+        vert_properties=np.require(mesh.vertices*1000, dtype=np.float64, requirements=['C', 'W']),
+        tri_verts=np.require(mesh.faces, dtype=np.uint64, requirements=['C', 'W'])))
     if result.status() != m3d.Error.NoError or result.is_empty():
         raise GeometryRejected(f"Boolean input rejected: {result.status()}")
     return result

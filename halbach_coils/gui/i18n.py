@@ -30,6 +30,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Tikhonov sweep": "Barrido Tikhonov",
         "Batch design": "Diseño en lote",
         "Shared dimensions": "Dimensiones compartidas",
+        "Inner gradient radius": "Radio interior del gradiente",
+        "Outer gradient radius": "Radio exterior del gradiente",
+        "Radii and gap include the complete gradient: mold, cable and groove. Plastic faces are shown separately.":
+            "Los radios y el gap incluyen el gradiente completo: molde, cable y ranura. Las caras de plástico se muestran aparte.",
+        "Use the inner radius of the innermost complete gradient, or the outer radius of the outermost complete gradient, including cable and groove.":
+            "Usa el radio interior del gradiente completo más interno o el exterior del más externo, incluyendo cable y ranura.",
+        "Gap = inner radius of the outer gradient minus outer radius of the inner gradient, including cable and groove. The crossing gap within each gradient is separate.":
+            "Gap = radio interno del gradiente exterior menos radio externo del interior, incluyendo cable y ranura. El gap de cruces dentro de cada gradiente es independiente.",
+        "{axis}: gradient {gradient_inner:.2f}–{gradient_outer:.2f} mm\nMold {inner:.2f}–{outer:.2f} mm; wall {wall:.2f} mm; groove {height:.2f} × {width:.2f} mm":
+            "{axis}: gradiente {gradient_inner:.2f}–{gradient_outer:.2f} mm\nMolde {inner:.2f}–{outer:.2f} mm; grosor {wall:.2f} mm; ranura {height:.2f} × {width:.2f} mm",
+        "Separation between complete gradients: {gap:.2f} mm.":
+            "Separación entre gradientes completos: {gap:.2f} mm.",
         "Inner mold radius": "Radio interior del conjunto",
         "Outer mold radius": "Radio exterior del conjunto",
         "Reference radius [mm]:": "Radio de referencia [mm]:",

@@ -6,8 +6,9 @@ Pipeline existente. El conjunto usa XYZ físicos, Z longitudinal y un mismo B₀
 
 ## Dimensiones
 
-Se introduce **un radio de referencia**: el radio interior del molde más
-interno o el radio exterior del molde más externo. Al cambiar de modo se
+Se introduce **un radio de referencia**: el radio interior del gradiente completo
+más interno o el radio exterior del más externo, incluyendo cable y ranuras.
+Al cambiar de modo se
 conserva inicialmente la geometría; después se puede editar ese radio.
 
 Cada eje tiene diámetro de cable, gap de cruce entre sus capas, Tikhonov y
@@ -19,24 +20,27 @@ molde se calcula con la fórmula del Pipeline:
 
 `margen_radial = fracción_de_recorte × altura_radial_ranura`
 
-El **gap entre gradientes** se mide entre paredes de moldes. Se calculan los
-seis radios y se muestran por separado las envolventes de cable. Estas pueden
-sobresalir de las paredes: un gap pequeño exige comprobar las trayectorias
-reales en tres dimensiones. La sugerencia conservadora que aparece en el
-visor no modifica la separación elegida.
+El **gap entre gradientes** es `Rint_exterior − Rext_interior`, usando la
+envolvente completa del gradiente (plástico, cable y ranura). Se calculan los
+seis radios de gradiente y se muestran aparte los del molde. El cable que
+sobresale del plástico se incluye en el grosor del gradiente; no consume el
+gap introducido. Se admite gap cero y se rechazan valores negativos antes
+de ejecutar. La comprobación CAD final sigue revisando leads y encajes reales.
+Los radios son envolventes nominales; gap cero representa contacto teórico.
+Se conserva la revisión de la geometría final discretizada.
 
-Por defecto: altura 170 mm, radio interno del molde 26,5 mm, cable 2 mm,
-factores A=2/B=1, gap de capas 0 mm y gap entre gradientes 4,3 mm. Los radios
-interior/exterior son Gz 26,5/30,5 mm, Gx 34,8/38,8 mm y Gy 43,1/47,1 mm.
-El radio máximo estimado del cable es 49,1 mm. Tikhonov inicial 2500 y 12
+Por defecto: altura 170 mm, radio interno del gradiente 26,5 mm, cable 2 mm,
+factores A=2/B=1, gap de capas 0 mm y gap entre gradientes 0,3 mm. Los radios
+interior/exterior completos son Gz 26,5/34,5 mm, Gx 34,8/42,8 mm y Gy 43,1/51,1 mm.
+Los radios del plástico son 28,5/32,5; 36,8/40,8 y 45,1/49,1 mm. Tikhonov inicial 2500 y 12
 niveles por eje; estos valores son puntos de partida, no una optimización del
 set completo ni de su acoplamiento mutuo.
 
 Los STL de referencia usan X longitudinal y se interpretaron mediante
 `(X_nuevo,Y_nuevo,Z_nuevo)=(Y_STL,Z_STL,X_STL)`. Su orden es Gz → Gx → Gy.
-Con cable de 1,5 mm, los mismos factores A/B, gap de capas 0 y gap entre
-gradientes 1 mm, el cálculo reproduce sus radios 26,5/29,5, 30,5/33,5 y
-34,5/37,5 mm. Los archivos adjuntos se usan como referencia geométrica;
+Sus radios de plástico medidos son 26,5/29,5, 30,5/33,5 y 34,5/37,5 mm.
+Estas medidas no especifican por sí solas el espacio ocupado por cable fuera
+del plástico. Los archivos adjuntos se usan como referencia geométrica;
 los sólidos nuevos se generan desde los resultados actuales.
 
 ## Encajes
@@ -76,7 +80,7 @@ descarte o Stop conserva los diseños individuales y marca el lote incompleto.
 Stop termina el proceso de trabajo y sus procesos dependientes, y actualiza
 tanto el marcador del trabajo como el manifiesto y resumen del lote.
 
-## Verificación real
+## Verificación de la versión inicial
 
 Se generaron los tres diseños de las dimensiones iniciales, incluido el
 conductor final con sus dos terminales. FastHenry instalado devolvió:
@@ -116,3 +120,33 @@ Sobre los STL finales también se comprobó cada interfaz desplazando copias
 en memoria: girar ±1° o avanzar 1 mm hacia +Z provoca colisión con el encaje;
 la posición original y la extracción 1 mm hacia −Z no provocan intersección.
 Esto verifica el bloqueo de giro en ambos sentidos y el tope axial descrito.
+
+## Corrección de la definición del gap
+
+La primera versión medía el gap entre paredes de plástico. El caso guardado
+en `Desktop/test` (radio de referencia 50 mm, cable 2 mm y gap 2 mm) tenía
+ranuras Gz/Gx superpuestas 254,246 mm³ y Gx/Gy 235,759 mm³. El STL empleado
+en ese chequeo es la envolvente de ranura, no un cable circular de 2 mm.
+Incluso las trayectorias nominales del cable circular quedaban prácticamente
+en contacto. El chequeo detectaba una incoherencia real en la dimensión que
+la interfaz llamaba separación entre gradientes.
+
+Desde el formato 2 de `lote.json`, radio de referencia y gap se aplican al
+gradiente completo. Para los mismos 50 mm y gap 2 mm, los radios completos
+son 50/58, 60/68 y 70/78 mm; los moldes son 52/56, 62/66 y 72/76 mm.
+No se alteran las bobinas de resultados anteriores, las fórmulas del Pipeline
+individual ni la validación CAD. Para usar la nueva separación hay que
+generar un lote nuevo, pues cambian los radios del cálculo electromagnético.
+
+La comprobación entre cables usa ahora sus trayectorias finales verificadas
+por hash y el diámetro circular real, con distancias exactas entre segmentos.
+El STL de ranuras deformadas se sigue usando para las comprobaciones de molde
+y encajes. Esto evita interpretar un cruce entre herramientas de sustracción
+fuera del plástico como si fuera necesariamente un cruce entre cables.
+
+Se repitió desde la interfaz el caso de radio 50 mm, gap 2 mm, ROI 30 mm,
+Tikhonov 2500 y 12 niveles en cada eje. Terminó en 297,4 segundos, con los
+tres moldes cerrados, encajes validados y FastHenry correcto en los tres ejes.
+Los resultados están en `halbach_coils/resultados/verificacion_lote_gap_20261015/`.
+La suite final pasó 343 pruebas. Se volvieron a comprobar los 18 chequeos
+del conjunto exportado usando el cable circular real y los moldes con encajes.

@@ -80,7 +80,7 @@ def test_batch_converts_mm_and_keeps_per_axis_values_when_reordered(app):
     assert [cfg.groove_radial_height for cfg in layers] == [.004, .003, .005]
 
 
-def test_one_inner_or_outer_anchor_reproduces_reference_dimensions(app):
+def test_one_inner_or_outer_anchor_keeps_same_complete_gradient_dimensions(app):
     from halbach_coils.coilgen.batch import build_layer_configs
 
     panel = app.batch_panel
@@ -90,17 +90,18 @@ def test_one_inner_or_outer_anchor_reproduces_reference_dimensions(app):
         variable.set('1.5')
     panel._redraw_preview()
     inner_layers = build_layer_configs(panel._build_cfg())
-    assert [(cfg.shell_inner_radius*1000, cfg.shell_outer_radius*1000) for cfg in inner_layers] == pytest.approx(
-        np.array([[26.5, 29.5], [30.5, 33.5], [34.5, 37.5]]))
+    assert [(cfg.estimated_wire_inner_radius*1000, cfg.estimated_wire_outer_radius*1000) for cfg in inner_layers] == pytest.approx(
+        np.array([[26.5, 32.5], [33.5, 39.5], [40.5, 46.5]]))
     # Switching references preserves the same assembly before another edit.
     panel.radius_mode_var.set('outer')
-    assert float(panel.anchor_radius_var.get()) == pytest.approx(37.5)
+    assert float(panel.anchor_radius_var.get()) == pytest.approx(46.5)
     batch = panel._build_cfg()
     assert batch.radius_mode == 'outer'
-    assert batch.anchor_radius == .0375
+    assert batch.anchor_radius == .0465
     layers = build_layer_configs(batch)
     np.testing.assert_allclose([(cfg.shell_inner_radius, cfg.shell_outer_radius) for cfg in layers],
                                [(cfg.shell_inner_radius, cfg.shell_outer_radius) for cfg in inner_layers])
+    assert 'gradient' in panel.radius_labels['z'].cget('text').lower()
 
 
 def test_batch_run_dispatches_one_process_job_with_shared_config(app, monkeypatch, tmp_path):

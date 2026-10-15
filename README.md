@@ -203,12 +203,13 @@ The GUI has three modes:
   does not fit inside the bore. Clear a step checkbox only when intentionally
   reusing an existing intermediate result.
 - **Batch design** creates Gx, Gy, and Gz sequentially in a common physical
-  frame. Choose the innermost mold's inner radius or the outermost mold's outer
-  radius, the shared height and ROI, and a gap between mold walls. Each axis
+  frame. Choose the innermost complete gradient's inner radius or the outermost
+  gradient's outer radius, the shared height and ROI, and a gap between gradients.
+  These radii include the former, exposed cable, and groove envelope. Each axis
   has its own cable diameter, crossing-layer gap, Tikhonov factor, and number
   of levels. The cable and crossing settings determine each wall thickness
-  using the same formula as Pipeline. All six mold radii are calculated;
-  the preview also shows the cable envelopes that protrude beyond the walls.
+  using the same formula as Pipeline. All six complete gradient radii are calculated;
+  the preview shows the plastic mold radii separately.
   The initial nesting order is Gz → Gx → Gy and can be changed.
 - **Tikhonov sweep** evaluates a logarithmic coarse range and, optionally, a
   fine range around promising values. It displays the samples and writes CSV
@@ -286,10 +287,12 @@ if the preferred angular station is occupied, another station is tried without
 rotating the gradients. There is no antenna recess. The initial preview shows
 provisional key positions until the final geometry has been checked.
 
-The gap is measured between mold bodies. The generated cable/channel solids
-can extend into that gap, especially at crossings and terminal leads. Completion
+The gap is `inner radius of the outer gradient - outer radius of the inner
+gradient`, including the exposed cable and groove envelope. Zero is allowed;
+negative values are rejected before calculation. Plastic faces are derived
+inside each complete gradient's radial extent. Completion
 requires checking the actual three-dimensional conductors and molds, including
-interference between layers; reducing the gap can therefore prevent completion.
+interference between layers and terminal leads.
 Failures and cancellation retain completed individual designs and mark the
 batch as incomplete.
 See [batch dimensions and assembly verification](docs/LOTE_Y_ENCAJES.md) for

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from halbach_coils.coilgen.batch import BatchConfig, build_layer_configs, run_batch
+from halbach_coils.coilgen.batch import BatchConfig, build_layer_configs, gradient_radial_bounds, run_batch
 from halbach_coils.coilgen.config import Config, preset_for
 from halbach_coils.run_pipeline import PipelineResult
 from halbach_coils.coilgen import batch as batch_module
@@ -35,11 +35,10 @@ def test_anchor_and_safe_default_gap_protect_wire_envelopes_and_preserve_base():
     original = deepcopy(batch.base)
     z, x, y = build_layer_configs(batch)
     assert (z.gradient_axis, x.gradient_axis, y.gradient_axis) == ('z', 'x', 'y')
-    # Default 4 mm wall and 2 mm protrusion per face: the shells themselves
-    # need 4.3 mm clearance to leave 0.3 mm between conductors.
-    assert z.shell_inner_radius == pytest.approx(.035)
-    assert z.shell_outer_radius == pytest.approx(.039)
-    assert z.estimated_wire_inner_radius == pytest.approx(.033)
+    # The 35 mm anchor is a real free radius, including exposed cable.
+    assert z.shell_inner_radius == pytest.approx(.037)
+    assert z.shell_outer_radius == pytest.approx(.041)
+    assert z.estimated_wire_inner_radius == pytest.approx(.035)
     assert x.shell_inner_radius - z.shell_outer_radius == pytest.approx(.0043)
     for inner, outer in ((z, x), (x, y)):
         assert outer.estimated_wire_inner_radius - inner.estimated_wire_outer_radius == pytest.approx(.0003)
@@ -61,13 +60,13 @@ def test_outer_anchor_preserves_total_radius_with_individual_wall_thicknesses():
                    layer_gaps=(.0002, .0004, .0001))
     z, x, y = build_layer_configs(batch)
     assert [cfg.shell_wall_thickness for cfg in (z, x, y)] == pytest.approx([.0041, .0032, .0054])
-    assert y.shell_outer_radius == pytest.approx(.055)
-    assert z.shell_inner_radius == pytest.approx(.0337)
+    assert gradient_radial_bounds(y)[1] == pytest.approx(.055)
+    assert gradient_radial_bounds(z)[0] == pytest.approx(.0297)
     for inner, outer in ((z, x), (x, y)):
-        assert outer.shell_inner_radius - inner.shell_outer_radius == pytest.approx(batch.radial_gap)
+        assert gradient_radial_bounds(outer)[0] - gradient_radial_bounds(inner)[1] == pytest.approx(batch.radial_gap)
     equivalent_inner = deepcopy(batch)
     equivalent_inner.radius_mode = 'inner'
-    equivalent_inner.anchor_radius = z.shell_inner_radius
+    equivalent_inner.anchor_radius = gradient_radial_bounds(z)[0]
     from_inner = build_layer_configs(equivalent_inner)
     assert [cfg.shell_outer_radius for cfg in from_inner] == pytest.approx(
         [cfg.shell_outer_radius for cfg in (z, x, y)])
@@ -81,29 +80,29 @@ def test_outer_anchor_preserves_total_radius_with_individual_wall_thicknesses():
 def test_nondefault_crossing_shift_uses_actual_derived_wire_envelopes():
     batch = _batch()
     batch.base.winding.normal_shift = -.006
-    batch.radial_gap = .0063
+    batch.radial_gap = .0003
     configs = build_layer_configs(batch)
-    assert configs[0].estimated_wire_inner_radius == pytest.approx(.031)
+    assert configs[0].estimated_wire_inner_radius == pytest.approx(.035)
     for inner, outer in zip(configs, configs[1:]):
         assert outer.estimated_wire_inner_radius - inner.estimated_wire_outer_radius == pytest.approx(.0003)
         assert outer.shell_inner_radius - inner.shell_outer_radius == pytest.approx(.0063)
 
 
-def test_reference_shell_dimensions_follow_wire_wall_formula():
+def test_thinner_cable_uses_same_pipeline_wall_but_reserves_real_gradient_gap():
     batch = _batch(anchor_radius=.0265, radial_gap=.001,
                    conductor_widths=(.0015, .0015, .0015), layer_gaps=(0, 0, 0))
     configs = build_layer_configs(batch)
-    # Measured Fusion examples: Z inside, then X, then Y. Their close radial
-    # envelopes are accepted here and must pass the actual assembly CAD check.
-    assert [cfg.shell_inner_radius for cfg in configs] == pytest.approx([.0265, .0305, .0345])
-    assert [cfg.shell_outer_radius for cfg in configs] == pytest.approx([.0295, .0335, .0375])
-    assert configs[1].estimated_wire_inner_radius < configs[0].estimated_wire_outer_radius
+    assert [cfg.shell_wall_thickness for cfg in configs] == pytest.approx([.003]*3)
+    assert [gradient_radial_bounds(cfg) for cfg in configs] == pytest.approx(
+        np.array([[.0265, .0325], [.0335, .0395], [.0405, .0465]]))
+    assert [cfg.shell_inner_radius for cfg in configs] == pytest.approx([.028, .035, .042])
 
 
 @pytest.mark.parametrize('field,value,match', [
     ('anchor_radius', -1, 'Anchor radius'),
     ('radius_mode', 'manual', 'Radius mode'),
-    ('radial_gap', float('nan'), 'shell gap'),
+    ('radial_gap', float('nan'), 'Inter-gradient gap'),
+    ('radial_gap', -.0001, 'Inter-gradient gap'),
     ('axis_order', ('z', 'z', 'x'), 'exactly once'),
     ('tikhonov_factors', (1, 2, float('inf')), 'Tikhonov'),
     ('num_levels', (1, 12, 16), 'level count'),
@@ -239,7 +238,7 @@ def test_output_folder_is_not_overwritten(tmp_path, monkeypatch):
     assert calls == ['z', 'x', 'y']
 
 
-def test_smaller_shell_gap_requires_actual_3d_verification(tmp_path, monkeypatch):
+def test_actual_3d_verification_is_still_required_for_terminal_leads(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr('halbach_coils.run_pipeline.run_pipeline', _fake_pipeline(calls))
     def verify(batch, configs, results):
@@ -249,8 +248,29 @@ def test_smaller_shell_gap_requires_actual_3d_verification(tmp_path, monkeypatch
         _run_batch(_batch(tmp_path, radial_gap=.001), finalize=verify)
     assert calls == ['z', 'x', 'y']
     document = json.loads((tmp_path / 'lote.json').read_text(encoding='utf-8'))
-    assert document['requires_interference_check']
+    assert not document['requires_interference_check']
+    assert document['format_version'] == 2
+    assert document['radial_gap_definition'].startswith('complete_gradient')
     assert document['status'] == 'failed'
+
+
+@pytest.mark.parametrize('gap', [0, .002])
+@pytest.mark.parametrize('mode', ['inner', 'outer'])
+def test_reported_user_case_gap_separates_complete_gradients(gap, mode):
+    batch = _batch(anchor_radius=.05, radial_gap=gap)
+    batch.base.target.rx = batch.base.target.ry = batch.base.target.rz = .03
+    layers = build_layer_configs(batch)
+    if mode == 'outer':
+        batch.radius_mode = 'outer'
+        batch.anchor_radius = gradient_radial_bounds(layers[-1])[1]
+        layers = build_layer_configs(batch)
+    assert gradient_radial_bounds(layers[0])[0] == pytest.approx(.05)
+    for inner, outer in zip(layers, layers[1:]):
+        assert gradient_radial_bounds(outer)[0] - gradient_radial_bounds(inner)[1] == pytest.approx(gap)
+        assert outer.shell_inner_radius - inner.shell_outer_radius == pytest.approx(.004 + gap)
+    if gap == .002:
+        assert [gradient_radial_bounds(cfg) for cfg in layers] == pytest.approx(
+            np.array([[.05, .058], [.06, .068], [.07, .078]]))
 
 
 def _report_document():

@@ -64,12 +64,12 @@ class BatchPanel(ttk.Frame):
         radius_modes.grid(row=1, column=0, columnspan=2, sticky='w', pady=4)
         self.radius_mode_var = tk.StringVar(self, value='inner')
         self._radius_mode = 'inner'
-        ttk.Radiobutton(radius_modes, text='Inner mold radius', variable=self.radius_mode_var,
+        ttk.Radiobutton(radius_modes, text='Inner gradient radius', variable=self.radius_mode_var,
                         value='inner').pack(side='left')
-        ttk.Radiobutton(radius_modes, text='Outer mold radius', variable=self.radius_mode_var,
+        ttk.Radiobutton(radius_modes, text='Outer gradient radius', variable=self.radius_mode_var,
                         value='outer').pack(side='left', padx=8)
         self.anchor_radius_var = self._entry(shared, 2, 'Reference radius [mm]:', '26.5')
-        self.radial_gap_var = self._entry(shared, 3, 'Gap between gradients [mm]:', '4.3')
+        self.radial_gap_var = self._entry(shared, 3, 'Gap between gradients [mm]:', '0.3')
         self.roi_vars = {}
         for row, axis in enumerate('xyz', 4):
             self.roi_vars[axis] = self._entry(shared, row, f'ROI R{axis} [mm]:', '20')
@@ -116,7 +116,7 @@ class BatchPanel(ttk.Frame):
             label = ttk.Label(layers, wraplength=430, justify='left')
             label.grid(row=row, column=0, columnspan=5, sticky='w', pady=2)
             self.radius_labels[axis] = label
-        self.radius_note = ttk.Label(layers, text='One reference radius fixes the set. Cable dimensions and crossings determine each mold thickness.',
+        self.radius_note = ttk.Label(layers, text='Radii and gap include the complete gradient: mold, cable and groove. Plastic faces are shown separately.',
                          wraplength=430, justify='left')
         self.radius_note.grid(row=8, column=0, columnspan=5, sticky='w', pady=(6, 0))
         self.total_radius_label = ttk.Label(layers, wraplength=430, justify='left')
@@ -189,8 +189,8 @@ class BatchPanel(ttk.Frame):
         self.radius_mode_var.trace_add('write', self._on_radius_mode_changed)
         self._bind_scroll(left, canvas)
         tips = [
-            (self._entries[str(self.anchor_radius_var)], 'Use the inner radius of the innermost mold, or the outer radius of the outermost mold. All other radii are calculated.'),
-            (self._entries[str(self.radial_gap_var)], 'Clearance between neighboring mold bodies. This is separate from the crossing gap inside each gradient.'),
+            (self._entries[str(self.anchor_radius_var)], 'Use the inner radius of the innermost complete gradient, or the outer radius of the outermost complete gradient, including cable and groove.'),
+            (self._entries[str(self.radial_gap_var)], 'Gap = inner radius of the outer gradient minus outer radius of the inner gradient, including cable and groove. The crossing gap within each gradient is separate.'),
             (self._entries[str(self.a_var)], 'A multiplies each cable diameter to set the radial groove height. B sets the tangential groove width.'),
             (self._entries[str(self.b_var)], 'A multiplies each cable diameter to set the radial groove height. B sets the tangential groove width.'),
         ]
@@ -268,10 +268,11 @@ class BatchPanel(ttk.Frame):
         self._preview_pending = self.after(250, self._redraw_preview)
 
     def _on_radius_mode_changed(self, *_args):
+        from halbach_coils.coilgen.batch import gradient_radial_bounds
         mode = self.radius_mode_var.get()
         if mode != self._radius_mode and self._last_layers:
-            value = (self._last_layers[0].shell_inner_radius if mode == 'inner'
-                     else self._last_layers[-1].shell_outer_radius)
+            value = (gradient_radial_bounds(self._last_layers[0])[0] if mode == 'inner'
+                     else gradient_radial_bounds(self._last_layers[-1])[1])
             self.anchor_radius_var.set(f'{value * 1000:.7g}')
         self._radius_mode = mode
         self._schedule_preview()
@@ -309,6 +310,7 @@ class BatchPanel(ttk.Frame):
             self.preview_notice.configure(text=self.root.tr(str(exc)), foreground='#a32323')
 
     def _draw_geometry(self, batch, layers):
+        from halbach_coils.coilgen.batch import gradient_radial_bounds
         ax, section = self.ax3d, self.radial_ax
         elev, azim = ax.elev, ax.azim
         ax.clear()
@@ -338,16 +340,19 @@ class BatchPanel(ttk.Frame):
                     ax.plot(radius*np.cos(theta), radius*np.sin(theta), np.full_like(theta, end),
                             color=color, linewidth=1)
             self.radius_labels[axis].configure(text=self.root.tr(
-                '{axis}: mold {inner:.2f}–{outer:.2f} mm; wall {wall:.2f} mm\nGroove {height:.2f} × {width:.2f} mm; cable envelope {wire_inner:.2f}–{wire_outer:.2f} mm',
+                '{axis}: gradient {gradient_inner:.2f}–{gradient_outer:.2f} mm\nMold {inner:.2f}–{outer:.2f} mm; wall {wall:.2f} mm; groove {height:.2f} × {width:.2f} mm',
+                gradient_inner=gradient_radial_bounds(cfg)[0]*1000,
+                gradient_outer=gradient_radial_bounds(cfg)[1]*1000,
                 axis='G'+axis.upper(), inner=inner, outer=outer,
                 wall=cfg.shell_wall_thickness * 1000,
                 height=cfg.groove_radial_height * 1000,
                 width=cfg.groove_tangential_width * 1000,
                 wire_inner=cfg.estimated_wire_inner_radius * 1000,
                 wire_outer=cfg.estimated_wire_outer_radius * 1000))
-            section.add_patch(Wedge((0, 0), cfg.estimated_wire_outer_radius*1000, 0, 360,
-                                    width=(cfg.estimated_wire_outer_radius-cfg.estimated_wire_inner_radius)*1000,
-                                    facecolor='none', edgecolor=color, linestyle=':', linewidth=.7))
+            gradient_inner, gradient_outer = gradient_radial_bounds(cfg)
+            section.add_patch(Wedge((0, 0), gradient_outer*1000, 0, 360,
+                                    width=(gradient_outer-gradient_inner)*1000,
+                                    facecolor=color, alpha=.16, edgecolor=color, linestyle=':', linewidth=.7))
         from halbach_coils.coilgen.assembly import nominal_key_pairs, key_pair_meshes
         actual_keys = (self._actual_interfaces is not None
                        and self._preview_signature() == getattr(self, '_running_signature', None))
@@ -378,12 +383,13 @@ class BatchPanel(ttk.Frame):
         ax.plot_surface(rx*np.cos(u)*np.sin(v), ry*np.sin(u)*np.sin(v), rz*np.cos(v),
                         color='#2f80ed', alpha=.22, linewidth=0)
         outer = max(cfg.shell_outer_radius for cfg in layers)*1000
-        wire_outer = max(cfg.estimated_wire_outer_radius for cfg in layers)*1000
+        wire_outer = max(gradient_radial_bounds(cfg)[1] for cfg in layers)*1000
         self.total_radius_label.configure(text=self.root.tr(
             'Maximum mold radius: {mold:.2f} mm. Total radius including cable: {cable:.2f} mm.',
             mold=outer, cable=wire_outer))
-        section.set_xlim(-outer*1.12, outer*1.12)
-        section.set_ylim(-outer*1.12, outer*1.12)
+        full_outer = max(gradient_radial_bounds(cfg)[1] for cfg in layers)*1000
+        section.set_xlim(-full_outer*1.12, full_outer*1.12)
+        section.set_ylim(-full_outer*1.12, full_outer*1.12)
         section.set_aspect('equal')
         section.set_xlabel('X [mm]', fontsize=8)
         section.set_ylabel('Y [mm]', fontsize=8)
@@ -408,20 +414,13 @@ class BatchPanel(ttk.Frame):
         notice = self.root.tr(
             'Inner to outer: {order}. B₀ {direction}. Preview shows dimensions; grooves require a design run.',
             order=order, direction=batch.base.b0_direction.upper())
-        minimum_gap = max(
-            inner.estimated_wire_outer_radius - inner.shell_outer_radius
-            + outer.shell_inner_radius - outer.estimated_wire_inner_radius
-            for inner, outer in zip(layers, layers[1:])) + .0003
-        notice += '\n' + self.root.tr('Suggested gap without radial overlap: {gap:.2f} mm.', gap=minimum_gap * 1000)
-        overlap = any(inner.estimated_wire_outer_radius > outer.estimated_wire_inner_radius
-                      for inner, outer in zip(layers, layers[1:]))
-        if overlap:
-            notice += '\n' + self.root.tr('Cable envelopes overlap radially. The final 3D check verifies the actual conductor clearance.')
+        notice += '\n' + self.root.tr('Separation between complete gradients: {gap:.2f} mm.',
+                                     gap=batch.radial_gap * 1000)
         if batch.include_keys:
             notice += '\n' + self.root.tr(
                 'Final key positions verified against the conductors.' if actual_keys else
                 'Key positions are preliminary; the final design selects a clear location for each key.')
-        self.preview_notice.configure(text=notice, foreground='#9c6515' if overlap else '')
+        self.preview_notice.configure(text=notice, foreground='')
         self.figure_canvas.draw_idle()
 
     def _on_run(self):

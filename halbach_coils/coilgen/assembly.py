@@ -208,11 +208,47 @@ def _load_layer(cfg, result):
             _solid(conductor, f'G{cfg.gradient_axis.upper()} final conductor'), source)
 
 
-def _check_conductors(configs, conductors, roi):
+def _current_path(cfg, source):
+    """Use the same hash-bound real current path as field/FastHenry checks."""
+    from .leads import current_path_path
+    filename = Path(current_path_path(source['conductor_path']))
+    if not filename.exists():
+        return None  # Older inputs retain the conservative groove-solid check.
+    with np.load(filename, allow_pickle=False) as saved:
+        if (str(saved['with_leads_sha256'].item()) != source['conductor_sha256']
+                or str(saved['units'].item()) != 'm'
+                or str(saved['coordinate_frame'].item()) != 'physical_xyz'
+                or str(saved['gradient_axis'].item()) != cfg.gradient_axis
+                or str(saved['b0_direction'].item()) != cfg.b0_direction):
+            raise RuntimeError('Final current path does not match the assembly conductor or physical coordinates.')
+        path = np.asarray(saved['path'], dtype=float) * 1000
+    if path.ndim != 2 or path.shape[1] != 3 or len(path) < 2 or not np.all(np.isfinite(path)):
+        raise RuntimeError('Final conductor path must contain finite XYZ points.')
+    return path
+
+
+def _check_conductors(configs, conductors, roi, current_paths=None):
+    from .lead_surface import near_segment_pairs
     checks = []
     for i, j in combinations(range(3), 2):
-        _check_pair(conductors[i], conductors[j], 'conductor / conductor',
-                    (configs[i].gradient_axis, configs[j].gradient_axis), checks)
+        if current_paths is not None and current_paths[i] is not None and current_paths[j] is not None:
+            # The with_leads STL is the deformed groove subtraction tool, not
+            # the round electrical cable. Segment capsules bound the real
+            # round-wire surface, including every retained winding and lead.
+            radius_sum = 500 * (configs[i].wire.conductor_width + configs[j].wire.conductor_width)
+            _a, _b, distances = near_segment_pairs(current_paths[i], current_paths[j], radius_sum)
+            clearance = float(distances.min() - radius_sum) if len(distances) else 0.0
+            axes = [configs[i].gradient_axis, configs[j].gradient_axis]
+            if clearance < -1e-6:
+                raise RuntimeError(f'Assembly interference: round conductor / conductor '
+                                   f'G{axes[0].upper()} / G{axes[1].upper()} have '
+                                   f'{-clearance:.6g} mm of surface overlap. Individual designs were kept.')
+            checks.append({'kind': 'conductor / conductor', 'axes': axes,
+                           'model': 'round_wire_segment_capsules', 'intersection_mm3': 0.0,
+                           'surface_clearance_lower_bound_mm': max(0.0, clearance)})
+        else:
+            _check_pair(conductors[i], conductors[j], 'conductor / conductor',
+                        (configs[i].gradient_axis, configs[j].gradient_axis), checks)
     for cfg, conductor in zip(configs, conductors):
         _check_pair(conductor, roi, 'conductor / ROI', (cfg.gradient_axis, 'ROI'), checks)
     return checks
@@ -312,7 +348,8 @@ def finalize_batch(batch, configs, results):
     loaded = [_load_layer(cfg, result) for cfg, result in zip(configs, results)]
     formers, conductors, sources = map(list, zip(*loaded))
     roi, roi_inflation = _roi_solid(configs[0])
-    conductor_checks = _check_conductors(configs, conductors, roi)
+    current_paths = [_current_path(cfg, source) for cfg, source in zip(configs, sources)]
+    conductor_checks = _check_conductors(configs, conductors, roi, current_paths)
     _check_formers(configs, formers, conductors, roi)
     interfaces = []
     if batch.include_keys:
@@ -341,6 +378,10 @@ def finalize_batch(batch, configs, results):
         if len(reloaded.geometry) != 3 or not np.allclose(reloaded.bounds, scene.bounds, atol=1e-7):
             raise RuntimeError('Exported assembly GLB did not preserve the three physical geometries.')
         report = {'format_version': 1, 'status': 'complete', 'units': 'mm',
+                  'conductor_geometry_model': ('round_wire_segment_capsules'
+                                               if all(path is not None for path in current_paths)
+                                               else 'manufacturing_groove_envelope_legacy'),
+                  'mold_and_key_clearance_model': 'manufacturing_groove_envelope',
                   'scene_units': 'm', 'coordinate_frame': 'physical_xyz',
                   'longitudinal_axis': 'z', 'angle_reference': '+X towards +Y about +Z',
                   'layer_order': [cfg.gradient_axis for cfg in configs],

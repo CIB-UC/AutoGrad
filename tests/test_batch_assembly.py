@@ -158,10 +158,46 @@ def test_conductor_interference_is_rejected_even_without_keys(design):
     assert not (Path(batch.output_dir) / 'Conjunto').exists()
 
 
+def test_round_conductors_do_not_confuse_overlapping_grooves_with_real_cable(design):
+    _, configs, results = design
+    # Identical groove tools intersect, while 1.5 mm round cables with 3 mm
+    # center spacing do not. The actual retained paths decide this check.
+    groove = _conductor([.03, 0, 0])
+    groove.apply_scale(1000)
+    solid = assembly._solid(groove, 'groove')
+    paths = [np.array([[30., 3.*i, -1.], [30., 3.*i, 1.]]) for i in range(3)]
+    roi, _ = assembly._roi_solid(configs[0])
+    checks = assembly._check_conductors(configs, [solid]*3, roi, paths)
+    assert len(checks) == 6
+    assert all(check['intersection_mm3'] == 0 for check in checks)
+    assert checks[0]['model'] == 'round_wire_segment_capsules'
+    paths[1][:, 1] = .5
+    with pytest.raises(RuntimeError, match='round conductor / conductor'):
+        assembly._check_conductors(configs, [solid]*3, roi, paths)
+
+
+def test_current_path_must_match_conductor_hash_and_coordinates(design):
+    _, configs, results = design
+    from halbach_coils.coilgen.leads import current_path_path
+    wire = _wire(results[0])
+    source = {'conductor_path': str(wire), 'conductor_sha256': 'expected'}
+    filename = current_path_path(wire)
+    saved = dict(path=np.array([[.03, 0, 0], [.03, 0, .01]]), units='m',
+                 coordinate_frame='physical_xyz', gradient_axis='z', b0_direction='+y',
+                 with_leads_sha256='expected')
+    np.savez(filename, **saved)
+    np.testing.assert_allclose(assembly._current_path(configs[0], source), saved['path']*1000)
+    saved['with_leads_sha256'] = 'stale'
+    np.savez(filename, **saved)
+    with pytest.raises(RuntimeError, match='does not match'):
+        assembly._current_path(configs[0], source)
+
+
 def test_terminal_through_another_former_is_rejected(design):
     batch, configs, results = design
     batch.include_keys = False
-    _conductor([0, .032, -.083]).export(_wire(results[0]))
+    radius = (configs[1].shell_inner_radius + configs[1].shell_outer_radius) / 2
+    _conductor([0, radius, -.083]).export(_wire(results[0]))
     with pytest.raises(RuntimeError, match='conductor / other former'):
         assembly.finalize_batch(batch, configs, results)
 

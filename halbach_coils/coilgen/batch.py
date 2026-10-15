@@ -1,8 +1,9 @@
 """Three concentric gradient designs using the existing sequential pipeline.
 
-Lengths use metres. One anchor radius and the gap between shell bodies define
-the three concentric shells; their wall thicknesses come from the existing
-wire/groove formula. Per-axis tuples always use X, Y, Z order. ``axis_order``
+Lengths use metres. One anchor radius and the gap between complete gradient
+envelopes define the three concentric layers. Each envelope contains both the
+former and the cable/groove, including crossings. Former wall thicknesses use
+the existing pipeline formula. Per-axis tuples always use X, Y, Z order. ``axis_order``
 changes the assembly's inside-to-outside order. Complete wire envelopes are
 reported separately and the actual assembly must pass its final 3D check.
 """
@@ -29,7 +30,7 @@ class BatchConfig:
     base: Config = field(default_factory=Config)
     anchor_radius: float = 0.0265
     radius_mode: str = 'inner'
-    radial_gap: float = 0.0043
+    radial_gap: float = 0.0003
     axis_order: tuple[str, str, str] = ('z', 'x', 'y')
     tikhonov_factors: tuple[float, float, float] | None = None
     num_levels: tuple[int, int, int] | None = None
@@ -59,17 +60,27 @@ def _positive(value, name, *, allow_zero=False) -> float:
     return number
 
 
+def gradient_radial_bounds(cfg: Config) -> tuple[float, float]:
+    """Complete radial extent, including the parts outside the plastic former."""
+    centers = (cfg.cylinder_design_radius,
+               cfg.cylinder_design_radius + cfg.normal_shift_length)
+    wire_radius = cfg.wire.conductor_width / 2
+    return (min(cfg.shell_inner_radius, cfg.estimated_wire_inner_radius, min(centers)-wire_radius),
+            max(cfg.shell_outer_radius, cfg.estimated_wire_outer_radius, max(centers)+wire_radius))
+
+
 def build_layer_configs(batch: BatchConfig) -> tuple[Config, ...]:
     """Validate and derive each layer without changing the shared input Config.
 
-    ``radius_mode='inner'`` fixes the innermost shell's inner radius; ``outer``
-    fixes the outermost shell's outer radius. ``radial_gap`` is the space
-    between shell bodies. The derived wire envelopes may overlap radially
-    without intersecting in 3D; final assembly validation decides that case.
+    ``radius_mode='inner'`` fixes the innermost complete gradient's inner
+    radius; ``outer`` fixes the outermost complete gradient's outer radius.
+    ``radial_gap = Rinner(next gradient) - Router(previous gradient)``.
+    The plastic faces are derived separately; exposed cable must not consume
+    the gap requested by the user. Final CAD still checks actual leads/keys.
     """
     base = batch.base
     anchor_radius = _positive(batch.anchor_radius, 'Anchor radius')
-    gap = _positive(batch.radial_gap, 'Inter-gradient shell gap', allow_zero=True)
+    gap = _positive(batch.radial_gap, 'Inter-gradient gap', allow_zero=True)
     if batch.radius_mode not in ('inner', 'outer'):
         raise ValueError('Radius mode must be inner or outer.')
     key_length = _positive(batch.key_length, 'Key axial length')
@@ -132,14 +143,23 @@ def build_layer_configs(batch: BatchConfig) -> tuple[Config, ...]:
                           if batch.output_dir else '')
         cfg.show_plots = False
         configs.append(cfg)
-    inner_radius = (anchor_radius if batch.radius_mode == 'inner' else
-                    anchor_radius - sum(cfg.shell_wall_thickness for cfg in configs) - 2 * gap)
-    if inner_radius <= max(roi[:2]):
-        raise ValueError('The ROI must fit inside the innermost shell; increase the anchor radius or reduce wall/gap.')
-    next_inner = inner_radius
+    # All radius-derived geometry translates linearly with cylinder.radius.
+    # Work out each layer's full width before placing any layer, so both
+    # anchor modes and different cable sizes use exactly the same gap.
+    extents = []
     for cfg in configs:
-        cfg.cylinder.radius = next_inner + cfg.shell_wall_thickness
-        next_inner = cfg.shell_outer_radius + gap
+        low, high = gradient_radial_bounds(cfg)
+        extents.append((cfg.shell_inner_radius - low, high - cfg.shell_outer_radius))
+    widths = [cfg.shell_wall_thickness + low + high
+              for cfg, (low, high) in zip(configs, extents)]
+    inner_radius = (anchor_radius if batch.radius_mode == 'inner' else
+                    anchor_radius - sum(widths) - 2 * gap)
+    if inner_radius <= max(roi[:2]):
+        raise ValueError('The ROI must fit inside the innermost gradient; increase the anchor radius or reduce thickness/gap.')
+    next_inner = inner_radius
+    for cfg, (protrudes_in, protrudes_out) in zip(configs, extents):
+        cfg.cylinder.radius = next_inner + protrudes_in + cfg.shell_wall_thickness
+        next_inner = cfg.shell_outer_radius + protrudes_out + gap
     return tuple(configs)
 
 
@@ -154,6 +174,8 @@ def _layer_record(cfg: Config, index: int) -> dict:
         'conductor_width_m': cfg.wire.conductor_width,
         'layer_crossing_gap_m': cfg.winding.layer_gap_mm,
         'shell_wall_thickness_m': cfg.shell_wall_thickness,
+        'gradient_inner_radius_m': gradient_radial_bounds(cfg)[0],
+        'gradient_outer_radius_m': gradient_radial_bounds(cfg)[1],
         'shell_inner_radius_m': cfg.shell_inner_radius,
         'shell_outer_radius_m': cfg.shell_outer_radius,
         'wire_inner_radius_m': cfg.estimated_wire_inner_radius,
@@ -162,6 +184,7 @@ def _layer_record(cfg: Config, index: int) -> dict:
 
 
 def _write_report(root: Path, document: dict) -> tuple[str, str]:
+    complete_gap = document.get('format_version', 1) >= 2
     manifest = root / 'lote.json'
     temporary = manifest.with_suffix('.json.tmp')
     temporary.write_text(json.dumps(document, indent=2, ensure_ascii=False,
@@ -182,20 +205,26 @@ def _write_report(root: Path, document: dict) -> tuple[str, str]:
         'Orden interior → exterior: ' + ' → '.join('G' + item['axis'].upper()
                                                     for item in document['layers']),
         f"B0 compartido: {document['b0_direction'].upper()}",
-        f"Radio ancla ({document['radius_mode']}): {document['anchor_radius_m'] * 1000:.6g} mm",
+        f"Radio ancla {'del gradiente completo' if complete_gap else 'del molde'} ({document['radius_mode']}): {document['anchor_radius_m'] * 1000:.6g} mm",
         f"Radio interior del molde: {document['shell_inner_radius_m'] * 1000:.6g} mm",
-        f"Radio exterior total: {document['shell_outer_radius_m'] * 1000:.6g} mm",
+        f"Radio exterior del molde: {document['shell_outer_radius_m'] * 1000:.6g} mm",
         f"Radio interior del cable estimado: {document['wire_inner_radius_m'] * 1000:.6g} mm",
-        f"Gap radial entre cuerpos de moldes: {document['radial_gap_m'] * 1000:.6g} mm",
-        'Las envolventes indican el cable que sobresale de las paredes del molde.',
+        f"Gap radial {'entre gradientes completos' if complete_gap else 'entre cuerpos de moldes'}: {document['radial_gap_m'] * 1000:.6g} mm",
+        ('Gap = Rint del gradiente exterior - Rext del gradiente interior, incluyendo cable y ranuras.'
+         if complete_gap else 'Formato anterior: el gap no incluía las partes de cable fuera del molde.'),
+        'Las caras de plástico del molde se indican por separado.',
         '',
     ]
     if document.get('requires_interference_check'):
         lines.extend(['Las envolventes radiales de cable coinciden o se acercan a la ROI.',
                       'Se debe comprobar la separación 3D real antes de completar el ensamble.', ''])
     for layer in document['layers']:
+        gradient_inner = layer.get('gradient_inner_radius_m', min(layer['shell_inner_radius_m'], layer['wire_inner_radius_m']))
+        gradient_outer = layer.get('gradient_outer_radius_m', max(layer['shell_outer_radius_m'], layer['wire_outer_radius_m']))
         lines.extend([
             f"{layer['directory']}/: {layer['status']}",
+            f"  Rint / Rext del gradiente completo: {gradient_inner * 1000:.6g} / "
+            f"{gradient_outer * 1000:.6g} mm",
             f"  Rint / Rext del molde: {layer['shell_inner_radius_m'] * 1000:.6g} / "
             f"{layer['shell_outer_radius_m'] * 1000:.6g} mm",
             f"  Envolvente del cable: {layer['wire_inner_radius_m'] * 1000:.6g} / "
@@ -255,7 +284,7 @@ def run_batch(batch: BatchConfig, should_stop=None, ask_user=None,
     working_batch.output_dir = str(root)
     configs = build_layer_configs(working_batch)
     document = {
-        'format_version': 1,
+        'format_version': 2,
         'coordinate_frame': 'physical_xyz',
         'status': 'running',
         'b0_direction': configs[0].b0_direction,
@@ -263,8 +292,11 @@ def run_batch(batch: BatchConfig, should_stop=None, ask_user=None,
         'radius_mode': batch.radius_mode,
         'shell_inner_radius_m': configs[0].shell_inner_radius,
         'shell_outer_radius_m': configs[-1].shell_outer_radius,
+        'gradient_inner_radius_m': gradient_radial_bounds(configs[0])[0],
+        'gradient_outer_radius_m': gradient_radial_bounds(configs[-1])[1],
         'wire_inner_radius_m': configs[0].estimated_wire_inner_radius,
         'radial_gap_m': float(batch.radial_gap),
+        'radial_gap_definition': 'complete_gradient_envelopes_including_cable_and_groove',
         'requires_interference_check': (
             configs[0].estimated_wire_inner_radius <= max(configs[0].target.rx, configs[0].target.ry)
             or any(right.estimated_wire_inner_radius < left.estimated_wire_outer_radius

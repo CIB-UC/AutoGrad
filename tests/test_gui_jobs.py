@@ -279,7 +279,7 @@ def test_real_app_stop_unlocks_all_tabs_and_close_terminates_active_worker():
         pytest.skip(f'Tk display unavailable: {exc}')
     app.withdraw()
     completed, destroyed = [], []
-    panels = (app.pipeline_panel, app.standalone_panel, app.sweep_panel)
+    panels = (app.pipeline_panel, app.batch_panel, app.sweep_panel)
     runner = app.pipeline_panel.runner
     app.bind('<Destroy>', lambda event: destroyed.append(True) if event.widget is app else None)
 
@@ -308,3 +308,81 @@ def test_real_app_stop_unlocks_all_tabs_and_close_terminates_active_worker():
                 runner.request_stop()
                 pump_until(lambda: not runner.is_running)
             app.destroy()
+
+
+def test_incomplete_batch_retains_progress_and_is_never_reported_as_done(tmp_path):
+    from halbach_coils.coilgen.batch import BatchResult
+
+    class Progress(dict):
+        def configure(self, **values):
+            self.update(values)
+
+    root, text = _Root(), _Text()
+    progress = Progress(value=100/3)
+    runner = WorkerRunner(text, progress, root)
+    runner.job_kind, runner.output_dir = 'batch', str(tmp_path)
+    root._active_job_runner = runner
+    result = BatchResult(str(tmp_path), False, (), 'summary.txt', 'lote.json')
+    runner._finish(result, None)
+    marker = json.loads((tmp_path / JOB_STATUS_FILENAME).read_text())
+    assert marker['status'] == 'partial' and marker['partial']
+    assert progress['value'] == pytest.approx(100/3)
+    assert 'INCOMPLETE' in runner.log_q.get_nowait()
+    assert root._active_job_runner is None
+
+
+def test_worker_reports_incomplete_batch_as_partial_before_gui_callback(tmp_path, monkeypatch):
+    from halbach_coils.coilgen.batch import BatchResult
+    from halbach_coils.gui import jobs
+
+    result = BatchResult(str(tmp_path), False, (), 'summary.txt', 'lote.json')
+    monkeypatch.setattr(jobs, 'dispatch_job', lambda *args, **kwargs: result)
+    if os.name != 'nt':
+        monkeypatch.setattr(jobs.os, 'setsid', lambda: None)
+    gate, events, answers = threading.Event(), queue.Queue(), queue.Queue()
+    gate.set()
+    original_stdout, original_stderr = sys.stdout, sys.stderr
+    try:
+        jobs.execute_job('batch', None, {}, events, answers, gate, str(tmp_path))
+    finally:
+        sys.stdout, sys.stderr = original_stdout, original_stderr
+    assert events.get_nowait() == ('done', result)
+    marker = json.loads((tmp_path / JOB_STATUS_FILENAME).read_text())
+    assert marker['status'] == 'partial' and marker['partial']
+
+
+@pytest.mark.parametrize('status, expected', [('cancelled', 'cancelled'), ('error', 'failed')])
+@pytest.mark.parametrize('phase', ['running', 'assembly'])
+def test_interrupted_batch_updates_manifest_and_summary_without_touching_completed_layers(
+        tmp_path, status, expected, phase):
+    from halbach_coils.coilgen.batch import _write_report
+
+    layers = []
+    for index, axis in enumerate('zxy'):
+        layers.append({
+            'axis': axis, 'directory': f'{index+1:02d}_G{axis}',
+            'status': 'complete' if phase == 'assembly' or index == 0 else 'running' if index == 1 else 'pending',
+            'shell_inner_radius_m': .0265 + index*.0083,
+            'shell_outer_radius_m': .0305 + index*.0083,
+            'wire_inner_radius_m': .0245 + index*.0083,
+            'wire_outer_radius_m': .0325 + index*.0083,
+            'tikhonov_factor': 2500, 'num_levels': 12,
+            'conductor_width_m': .002, 'layer_crossing_gap_m': 0,
+            'shell_wall_thickness_m': .004,
+        })
+    document = {
+        'status': phase, 'b0_direction': '+y', 'layers': layers,
+        'radius_mode': 'inner', 'anchor_radius_m': .0265,
+        'shell_inner_radius_m': .0265, 'shell_outer_radius_m': .0471,
+        'wire_inner_radius_m': .0245, 'radial_gap_m': .0043,
+    }
+    _write_report(tmp_path, document)
+    write_job_status(str(tmp_path), status, kind='batch', error='stopped' if status == 'cancelled' else 'failed worker')
+    saved = json.loads((tmp_path / 'lote.json').read_text(encoding='utf-8'))
+    assert saved['status'] == expected
+    assert saved['layers'][0]['status'] == 'complete'
+    assert [layer['status'] for layer in saved['layers']] == (
+        ['complete']*3 if phase == 'assembly' else ['complete', expected, 'pending'])
+    summary = (tmp_path / 'Resumen_lote.txt').read_text(encoding='utf-8')
+    assert f'Estado: {expected}' in summary
+    assert 'El conjunto está incompleto.' in summary

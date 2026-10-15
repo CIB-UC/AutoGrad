@@ -8,10 +8,15 @@ import os
 import sys
 import traceback
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 JOB_STATUS_FILENAME = '.job_status.json'
-JOB_KINDS = ('pipeline', 'standalone', 'sweep')
+JOB_KINDS = ('pipeline', 'batch', 'standalone', 'sweep')
+
+
+def result_job_status(kind, result):
+    return 'partial' if kind == 'batch' and getattr(result, 'completed', True) is False else 'completed'
 
 
 def job_output_dir(kind, cfg, extra=None):
@@ -41,6 +46,29 @@ def write_job_status(output_dir, status, *, kind, pid=None, error=None):
         json.dump(record, handle, ensure_ascii=False, indent=2)
         handle.write('\n')
     os.replace(temporary, path)
+    if kind == 'batch' and status in ('cancelled', 'error'):
+        _update_interrupted_batch(output_dir, status, error)
+
+
+def _update_interrupted_batch(output_dir, status, error):
+    """The parent reports cancellation after the worker can no longer do so."""
+    root = Path(output_dir)
+    manifest = root / 'lote.json'
+    try:
+        document = json.loads(manifest.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return
+    if document.get('status') not in ('running', 'assembly'):
+        return
+    final_status = 'cancelled' if status == 'cancelled' else 'failed'
+    document['status'] = final_status
+    if error:
+        document['error'] = str(error)
+    for layer in document.get('layers', ()):
+        if layer.get('status') == 'running':
+            layer['status'] = final_status
+    from halbach_coils.coilgen.batch import _write_report
+    _write_report(root, document)
 
 
 class _ProcessLog(io.TextIOBase):
@@ -71,6 +99,12 @@ def dispatch_job(kind, cfg, extra, *, ask_user, on_progress):
         from halbach_coils.run_pipeline import run_pipeline
         return run_pipeline(cfg, ask_user=ask_user,
                             question_language=extra.get('question_language', 'es'))
+    if kind == 'batch':
+        from halbach_coils.coilgen.batch import run_batch
+        from halbach_coils.coilgen.assembly import finalize_batch
+        return run_batch(cfg, ask_user=ask_user, on_progress=on_progress,
+                         question_language=extra.get('question_language', 'es'),
+                         finalize=finalize_batch)
     if kind == 'standalone':
         from halbach_coils.coilgen.outputs import organize_outputs, relocate_paths, write_result_summary
         action = extra.get('action', 'wire')
@@ -134,7 +168,7 @@ def execute_job(kind, cfg, extra, events, answers, start_gate, output_dir):
         write_job_status(output_dir, 'running', kind=kind, pid=os.getpid())
         result = dispatch_job(kind, cfg, extra, ask_user=ask_user,
                               on_progress=on_progress)
-        write_job_status(output_dir, 'completed', kind=kind, pid=os.getpid())
+        write_job_status(output_dir, result_job_status(kind, result), kind=kind, pid=os.getpid())
         redirect.flush()
         events.put(('done', result))
     except BaseException as exc:

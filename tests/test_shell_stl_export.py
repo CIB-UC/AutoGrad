@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 import trimesh
+from io import BytesIO
 
 from halbach_coils.coilgen.shell import export_validated_shell_stl
 
@@ -41,3 +42,46 @@ def test_an_open_shell_is_not_published(tmp_path):
     with pytest.raises(RuntimeError, match='failed validation'):
         export_validated_shell_stl(mesh, target)
     assert not target.exists()
+
+
+def test_float32_collinear_sliver_collapses_only_its_sub_precision_edge(tmp_path):
+    base = trimesh.creation.box(extents=[100, 100, 100])
+    a, b, c = base.faces[0]
+    extra = len(base.vertices)
+    # The point lies inside this face, close to the a-b edge and vertex a.
+    # Float32 erases its perpendicular component but retains the tiny a-p
+    # edge. Deleting the now-collinear a-b-p triangle alone opens the solid.
+    point = (base.vertices[a] + (base.vertices[b] - base.vertices[a]) * 7e-8
+             + (base.vertices[c] - base.vertices[a]) * 1e-10)
+    vertices = np.vstack([base.vertices, point])
+    faces = np.vstack([base.faces[1:], [a, b, extra], [b, c, extra], [c, a, extra]])
+    mesh = trimesh.Trimesh(vertices, faces, process=False)
+    assert mesh.is_watertight
+    rounded = trimesh.load_mesh(BytesIO(mesh.export(file_type='stl')), file_type='stl')
+    assert np.count_nonzero(~rounded.nondegenerate_faces()) == 1
+    rounded.update_faces(rounded.nondegenerate_faces())
+    assert not rounded.is_watertight
+    target = tmp_path / 'precision_sliver.stl'
+    result = export_validated_shell_stl(mesh, target)
+    assert result.is_watertight and result.is_winding_consistent
+    assert np.all(result.nondegenerate_faces())
+    assert result.volume == pytest.approx(base.volume)
+    assert len(result.faces) == len(base.faces)
+
+
+def test_collinear_t_junction_retessellates_neighbor_without_filling_a_hole(tmp_path):
+    base = trimesh.creation.box(extents=[100, 100, 100])
+    a, b, c = base.faces[0]
+    extra = len(base.vertices)
+    point = base.vertices[a] + (base.vertices[b] - base.vertices[a]) * .3
+    vertices = np.vstack([base.vertices, point])
+    faces = np.vstack([base.faces[1:], [a, b, extra], [b, c, extra], [c, a, extra]])
+    mesh = trimesh.Trimesh(vertices, faces, process=False)
+    assert mesh.is_watertight
+    assert np.count_nonzero(~mesh.nondegenerate_faces()) == 1
+    target = tmp_path / 'collinear_junction.stl'
+    result = export_validated_shell_stl(mesh, target)
+    assert result.is_watertight and result.is_winding_consistent
+    assert np.all(result.nondegenerate_faces())
+    assert result.volume == pytest.approx(base.volume)
+    np.testing.assert_allclose(result.bounds, base.bounds)

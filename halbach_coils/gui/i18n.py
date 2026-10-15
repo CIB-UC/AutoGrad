@@ -28,6 +28,73 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Output directory:": "Directorio de salida:",
         "Browse...": "Examinar...",
         "Tikhonov sweep": "Barrido Tikhonov",
+        "Batch design": "Diseño en lote",
+        "Shared dimensions": "Dimensiones compartidas",
+        "Inner mold radius": "Radio interior del conjunto",
+        "Outer mold radius": "Radio exterior del conjunto",
+        "Reference radius [mm]:": "Radio de referencia [mm]:",
+        "Gap between gradients [mm]:": "Separación entre gradientes [mm]:",
+        "Cable Ø [mm]": "Ø cable [mm]",
+        "Layer gap [mm]": "Gap capas [mm]",
+        "One reference radius fixes the set. Cable dimensions and crossings determine each mold thickness.":
+            "Un radio de referencia define el conjunto. El cable y sus cruces determinan el grosor de cada molde.",
+        "Use the inner radius of the innermost mold, or the outer radius of the outermost mold. All other radii are calculated.":
+            "Usa el radio interior del molde más interno o el radio exterior del molde más externo. Los demás radios se calculan.",
+        "Clearance between neighboring mold bodies. This is separate from the crossing gap inside each gradient.":
+            "Separación entre los cuerpos de moldes vecinos. Es independiente del gap de cruces dentro de cada gradiente.",
+        "A multiplies each cable diameter to set the radial groove height. B sets the tangential groove width.":
+            "A multiplica el diámetro de cada cable para definir la altura radial del surco. B define su ancho tangencial.",
+        "Radial gap between cable crossings within this gradient. It contributes to this mold thickness.":
+            "Separación radial entre los cruces de cable dentro de este gradiente. Se incluye en el grosor del molde.",
+        "{axis}: mold {inner:.2f}–{outer:.2f} mm; wall {wall:.2f} mm\nGroove {height:.2f} × {width:.2f} mm; cable envelope {wire_inner:.2f}–{wire_outer:.2f} mm":
+            "{axis}: molde {inner:.2f}–{outer:.2f} mm; grosor {wall:.2f} mm\nSurco {height:.2f} × {width:.2f} mm; envolvente {wire_inner:.2f}–{wire_outer:.2f} mm",
+        "Suggested gap without radial overlap: {gap:.2f} mm.":
+            "Separación sugerida sin solapar las envolventes: {gap:.2f} mm.",
+        "Cable envelopes overlap radially. The final 3D check verifies the actual conductor clearance.":
+            "Las envolventes de los cables se solapan radialmente. La comprobación 3D final verifica la separación real.",
+        "Final key positions verified against the conductors.":
+            "Posiciones finales de los encajes comprobadas con los conductores.",
+        "Key positions are preliminary; the final design selects a clear location for each key.":
+            "Los encajes son preliminares; el diseño final selecciona una ubicación libre para cada encaje.",
+        "Free inner radius [mm]:": "Radio interior libre [mm]:",
+        "Radial assembly clearance [mm]:": "Holgura radial entre bobinas [mm]:",
+        "ROI Rx [mm]:": "ROI Rx [mm]:",
+        "ROI Ry [mm]:": "ROI Ry [mm]:",
+        "ROI Rz [mm]:": "ROI Rz [mm]:",
+        "Layers: inner to outer": "Capas: de adentro hacia afuera",
+        "Layer order:": "Orden de las capas:",
+        "Automatic radii": "Radios automáticos",
+        "Set three outer radii": "Definir tres radios externos",
+        "Rext [mm]": "Rext [mm]",
+        "Tikhonov": "Tikhonov",
+        "Axis": "Eje",
+        "Levels": "Niveles",
+        "Automatic spacing reserves clearance for the cable and its crossings, including the portions outside the mold.":
+            "La separación automática reserva holgura para el cable y sus cruces, incluidas las partes que sobresalen del molde.",
+        "Assembly keys": "Encajes de montaje",
+        "Generate anti-rotation keys": "Generar encajes que impidan la rotación",
+        "Key axial length [mm]:": "Largo axial del encaje [mm]:",
+        "Key width [mm]:": "Ancho del encaje [mm]:",
+        "Key clearance per side [mm]:": "Holgura del encaje por lado [mm]:",
+        "Keys share the physical X/Y/Z frame. The gradients are never rotated to fit.":
+            "Los encajes comparten la referencia física X/Y/Z. Los gradientes conservan su orientación al ensamblarse.",
+        "Design Gx, Gy and Gz": "Diseñar Gx, Gy y Gz",
+        "Concentric assembly preview": "Vista previa del conjunto concéntrico",
+        "Field results:": "Resultados del campo:",
+        "Radial section": "Corte radial",
+        "Assembly: Z longitudinal": "Conjunto: Z longitudinal",
+        "Maximum mold radius: {mold:.2f} mm. Total radius including cable: {cable:.2f} mm.":
+            "Radio máximo del molde: {mold:.2f} mm. Radio total incluido el cable: {cable:.2f} mm.",
+        "{axis}: mold {inner:.2f}–{outer:.2f}; cable {wire_inner:.2f}–{wire_outer:.2f} mm":
+            "{axis}: molde {inner:.2f}–{outer:.2f}; cable {wire_inner:.2f}–{wire_outer:.2f} mm",
+        "Inner to outer: {order}. B₀ {direction}. Preview shows dimensions; grooves require a design run.":
+            "De adentro hacia afuera: {order}. B₀ {direction}. La vista muestra dimensiones; los surcos se calculan al diseñar.",
+        "Batch: {axis} — {event}": "Lote: {axis} — {event}",
+        "start": "iniciando",
+        "complete": "completo",
+        "The set is incomplete. Completed layers were kept in:\n{path}":
+            "El conjunto está incompleto. Las capas terminadas se conservaron en:\n{path}",
+        "Partial results in:\n{path}": "Resultados parciales en:\n{path}",
         "Select output directory": "Seleccionar directorio de salida",
         "Full pipeline": "Pipeline completo",
         "Gradient axis:": "Eje gradiente:",

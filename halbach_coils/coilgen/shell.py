@@ -40,35 +40,145 @@ VOXEL_CROP_PAD = 0.005  # [m] margin around shell bbox for voxel pass
 # ---------------------------------------------------------------------------
 
 def manifold_from_trimesh(tm):
-    mesh = m3d.Mesh(
-        vert_properties=np.asarray(tm.vertices, dtype=np.float32),
-        tri_verts=np.asarray(tm.faces, dtype=np.uint32),
+    mesh = m3d.Mesh64(
+        vert_properties=np.asarray(tm.vertices, dtype=np.float64),
+        tri_verts=np.asarray(tm.faces, dtype=np.uint64),
     )
     return m3d.Manifold(mesh)
 
 
 def trimesh_from_manifold(manifold):
-    mesh = manifold.to_mesh()
-    verts = np.asarray(mesh.vert_properties, dtype=np.float64)[:, :3]
+    mesh = manifold.to_mesh64()
+    verts = np.asarray(mesh.vert_properties, dtype=np.float64)[:, :3].copy()
     faces = np.asarray(mesh.tri_verts, dtype=np.int64)
     return trimesh.Trimesh(vertices=verts, faces=faces, process=False)
+
+
+def _collapse_stl_precision_edges(mesh):
+    """Collapse only degenerate-face edges within two float32 coordinate ULPs.
+
+    An almost collinear boolean triangle can become exactly collinear in STL
+    while its shortest edge stays several nanometres long. Simply deleting
+    that face leaves a slit. Collapsing its unresolvable edge preserves the
+    neighboring topology without filling holes or remeshing the grooves.
+    """
+    degenerate = ~mesh.nondegenerate_faces()
+    if not np.any(degenerate):
+        return
+    triangles = mesh.faces[degenerate]
+    edges = np.stack((triangles[:, [0, 1]], triangles[:, [1, 2]],
+                      triangles[:, [2, 0]]), axis=1)
+    lengths = np.linalg.norm(mesh.vertices[edges[:, :, 0]] -
+                             mesh.vertices[edges[:, :, 1]], axis=2)
+    tolerance = 2 * float(np.spacing(np.float32(np.abs(mesh.vertices).max())))
+    parents = np.arange(len(mesh.vertices))
+
+    def root(index):
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    for triangle_edges, triangle_lengths in zip(edges, lengths):
+        shortest = int(np.argmin(triangle_lengths))
+        if triangle_lengths[shortest] <= tolerance:
+            first, second = (root(index) for index in triangle_edges[shortest])
+            parents[max(first, second)] = min(first, second)
+    while not np.array_equal(parents, parents[parents]):
+        parents = parents[parents]
+    # Never let a chain of tiny edges move a surviving vertex farther than
+    # the same serialization bound used for each individual collapse.
+    if np.any(np.linalg.norm(mesh.vertices - mesh.vertices[parents], axis=1) > tolerance):
+        raise RuntimeError('Shell STL failed validation: precision-edge collapse exceeded its bound.')
+    mesh.faces = parents[mesh.faces]
+
+
+def _retessellate_collinear_faces(mesh):
+    """Remove a collinear ABC face by inserting middle vertex C on neighbor AB.
+
+    Deleting ABC alone opens a T-junction. Splitting the adjacent triangle
+    along C preserves its surface and the shared edge topology exactly.
+    """
+    for _ in range(np.count_nonzero(~mesh.nondegenerate_faces())):
+        changed = False
+        for index in np.flatnonzero(~mesh.nondegenerate_faces()):
+            face = mesh.faces[index]
+            if len(set(face)) != 3:
+                continue
+            edges = np.array([face[[0, 1]], face[[1, 2]], face[[2, 0]]])
+            lengths = np.linalg.norm(mesh.vertices[edges[:, 1]] - mesh.vertices[edges[:, 0]], axis=1)
+            edge = edges[np.argmax(lengths)]
+            if lengths.max() <= 0:
+                continue
+            middle = next(vertex for vertex in face if vertex not in edge)
+            start, end = mesh.vertices[edge]
+            direction = end - start
+            position = float(np.dot(mesh.vertices[middle] - start, direction) / np.dot(direction, direction))
+            distance = np.linalg.norm(mesh.vertices[middle] - (start + position * direction))
+            if not 0 < position < 1 or distance > trimesh.constants.tol.merge:
+                continue
+            neighbors = np.flatnonzero(np.isin(mesh.faces, edge).sum(axis=1) == 2)
+            neighbors = neighbors[neighbors != index]
+            if len(neighbors) != 1:
+                continue
+            neighbor = int(neighbors[0])
+            adjacent = mesh.faces[neighbor]
+            if not mesh.nondegenerate_faces()[neighbor]:
+                continue
+            for rotation in range(3):
+                first, second, third = np.roll(adjacent, -rotation)
+                if {first, second} == set(edge):
+                    break
+            keep = np.ones(len(mesh.faces), dtype=bool)
+            keep[[index, neighbor]] = False
+            mesh.faces = np.vstack([mesh.faces[keep], [first, middle, third],
+                                    [middle, second, third]])
+            changed = True
+            break
+        if not changed:
+            break
+
+
+def _serialized_shell(mesh):
+    serialized = trimesh.load_mesh(BytesIO(mesh.export(file_type='stl')), file_type='stl')
+    _collapse_stl_precision_edges(serialized)
+    serialized.update_faces(serialized.nondegenerate_faces() & serialized.unique_faces())
+    serialized.remove_unreferenced_vertices()
+    payload = serialized.export(file_type='stl')
+    return payload, trimesh.load_mesh(BytesIO(payload), file_type='stl')
+
+
+def _valid_shell(mesh):
+    return (mesh.is_watertight and mesh.is_winding_consistent and len(mesh.faces)
+            and mesh.volume > 0 and np.all(np.isfinite(mesh.vertices))
+            and np.all(mesh.nondegenerate_faces()))
 
 
 def export_validated_shell_stl(mesh, filename):
     """Validate the actual float32 STL, removing collapsed/duplicate triangles.
 
     Booleans can leave tiny edges that collapse at STL precision. Merging those
-    vertices must also remove the resulting zero-area triangles. Validate a
-    second reload before publishing, rather than reporting the in-memory mesh.
+    vertices must also remove the resulting zero-area triangles. Short edges
+    of those faces are collapsed only within STL float32 precision. Validate
+    a second reload before publishing, rather than reporting the in-memory mesh.
     """
-    serialized = trimesh.load_mesh(BytesIO(mesh.export(file_type='stl')), file_type='stl')
-    serialized.update_faces(serialized.nondegenerate_faces() & serialized.unique_faces())
-    serialized.remove_unreferenced_vertices()
-    payload = serialized.export(file_type='stl')
-    final = trimesh.load_mesh(BytesIO(payload), file_type='stl')
-    if (not final.is_watertight or not final.is_winding_consistent
-            or not len(final.faces) or final.volume <= 0
-            or not np.all(final.nondegenerate_faces())):
+    payload, final = _serialized_shell(mesh)
+    if not _valid_shell(final) and mesh.is_watertight and mesh.is_winding_consistent:
+        # Some CSG results contain exactly zero-volume sheets and collinear
+        # T-junction triangles. Keep every physical component, simplify only
+        # within the smaller of the sliver threshold and STL precision, then
+        # retessellate those collinear neighbors before serializing again.
+        solid = manifold_from_trimesh(mesh)
+        if solid.status() == m3d.Error.NoError and not solid.is_empty():
+            physical = [part for part in solid.decompose() if part.volume() != 0.0]
+            if physical:
+                solid = physical[0] if len(physical) == 1 else m3d.Manifold.compose(physical)
+                precision = 2 * float(np.spacing(np.float32(np.abs(mesh.vertices).max())))
+                tolerance = min(float(trimesh.constants.tol.merge), precision)
+                repaired = trimesh_from_manifold(solid.simplify(tolerance))
+                _retessellate_collinear_faces(repaired)
+                payload, final = _serialized_shell(repaired)
+    if not _valid_shell(final):
         raise RuntimeError('Shell STL failed validation after export; no result was published.')
     with open(filename, 'xb') as stream:
         stream.write(payload)

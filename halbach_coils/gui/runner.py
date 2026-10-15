@@ -11,7 +11,7 @@ import subprocess
 import threading
 from typing import Callable, Optional
 
-from .jobs import JOB_KINDS, execute_job, job_output_dir, write_job_status
+from .jobs import JOB_KINDS, execute_job, job_output_dir, write_job_status, result_job_status
 from halbach_coils.coilgen.process_control import WindowsJob as _WindowsJob
 
 
@@ -190,7 +190,8 @@ class WorkerRunner:
 
     def _finish(self, result, error):
         callback = self._on_done
-        status = 'cancelled' if isinstance(error, JobCancelled) else 'error' if error else 'completed'
+        status = ('cancelled' if isinstance(error, JobCancelled) else 'error' if error
+                  else result_job_status(self.job_kind, result))
         pid = self.worker.pid if self.worker is not None else None
         try:
             write_job_status(self.output_dir, status, kind=self.job_kind, pid=pid,
@@ -209,9 +210,10 @@ class WorkerRunner:
         self._on_done = self._on_progress = self._ask_user_callback = None
         if getattr(self.root, '_active_job_runner', None) is self:
             self.root._active_job_runner = None
-        if self.progress is not None:
+        if self.progress is not None and status != 'partial':
             self.progress.configure(value=100 if error is None else 0)
         self.log('\n>> CANCELLED\n' if status == 'cancelled' else
+                 '\n>> INCOMPLETE — completed layers were kept.\n' if status == 'partial' else
                  f'\n>> ERROR: {error}\n' if error else '\n>> DONE\n')
         self._state_changed()
         if callback is not None:

@@ -182,7 +182,7 @@ applied immediately and intentionally starts from English on every launch.
 All dimensions entered in the GUI are millimetres. The application converts
 them to metres for `Config` and `pyCoilGen` internally.
 
-The Pipeline, Standalone wire, and Tikhonov sweep panels let you select Cu, Al,
+The Pipeline, Batch design, and Tikhonov sweep panels let you select Cu, Al,
 or Ag conductor material. They fill the corresponding room-temperature
 resistivity in ohm.m; choose **Custom** to enter a different material or
 temperature-adjusted value. The resistivity is used by both pyCoilGen's ohmic
@@ -202,10 +202,14 @@ The GUI has three modes:
   STL pair from `halbach_coils/assets/shells`. The preview warns when the ROI
   does not fit inside the bore. Clear a step checkbox only when intentionally
   reusing an existing intermediate result.
-- **Standalone** runs one stage. `wire` creates a coil without an input STL;
-  `leads` expects a wire STL; `shell` expects a with-leads STL and a shell pair.
-  This mode is mainly useful for development and for repeating a downstream
-  manufacturing stage.
+- **Batch design** creates Gx, Gy, and Gz sequentially in a common physical
+  frame. Choose the innermost mold's inner radius or the outermost mold's outer
+  radius, the shared height and ROI, and a gap between mold walls. Each axis
+  has its own cable diameter, crossing-layer gap, Tikhonov factor, and number
+  of levels. The cable and crossing settings determine each wall thickness
+  using the same formula as Pipeline. All six mold radii are calculated;
+  the preview also shows the cable envelopes that protrude beyond the walls.
+  The initial nesting order is Gz → Gx → Gy and can be changed.
 - **Tikhonov sweep** evaluates a logarithmic coarse range and, optionally, a
   fine range around promising values. It displays the samples and writes CSV
   and text summaries to the selected output directory.
@@ -249,7 +253,7 @@ and diagnostic files. Their exact contents depend on the selected steps. Keep
 the full run directory when comparing designs: the final shell alone does not
 record every parameter or diagnostic needed to reproduce the run.
 
-Completed Pipeline and Standalone runs are arranged by stage:
+Completed individual Pipeline runs are arranged by stage:
 
 ```text
 output/
@@ -266,6 +270,30 @@ and inductance. `Bobina/*_metrics.txt` describes the wire **before terminal
 leads** and does not contain the final solver values. Use `Resumen.txt` or
 `Leads/*_final_metrics.json` for those. File pickers and reuse also support older
 flat output directories. See [output and FastHenry verification](docs/SALIDAS_Y_FASTHENRY.md).
+
+Batch results retain this organization inside `01_Gz/`, `02_Gx/`, and
+`03_Gy/` (or the selected order), with `Resumen_lote.txt` and `lote.json`
+at the top level. A successful set adds `Conjunto/` containing the three
+assembly molds, a colored GLB scene, and the measured key/interference report.
+Use the STLs in `Conjunto/` for the assembled molds. Individual layer folders
+keep the original pipeline outputs and final field/electrical results.
+
+Assembly keys use a tab on the inner mold and an open-ended slot in the next
+mold, entering from −Z. The initial dimensions are 4 mm width and axial length,
+with 0.1 mm clearance on each tangential side and at the axial stop. Key
+placement is checked against the generated conductors and neighboring molds;
+if the preferred angular station is occupied, another station is tried without
+rotating the gradients. There is no antenna recess. The initial preview shows
+provisional key positions until the final geometry has been checked.
+
+The gap is measured between mold bodies. The generated cable/channel solids
+can extend into that gap, especially at crossings and terminal leads. Completion
+requires checking the actual three-dimensional conductors and molds, including
+interference between layers; reducing the gap can therefore prevent completion.
+Failures and cancellation retain completed individual designs and mark the
+batch as incomplete.
+See [batch dimensions and assembly verification](docs/LOTE_Y_ENCAJES.md) for
+the radius formulas, reference measurements, and tested set.
 
 ## Configuration and pipeline stages
 

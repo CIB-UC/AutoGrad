@@ -1,5 +1,5 @@
 """
-Main GUI window — mode selector (Pipeline / Standalone / Tikhonov sweep),
+Main GUI window — mode selector (Pipeline / Batch / Tikhonov sweep),
 shared output-directory field, and application language menu.
 
 From the repository root, run with
@@ -13,7 +13,7 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 
 from .pipeline_panel import PipelinePanel
-from .standalone_panel import StandalonePanel
+from .batch_panel import BatchPanel
 from .sweep_panel import SweepPanel
 from .i18n import DEFAULT_LANGUAGE, LANGUAGES, Localizer
 
@@ -48,9 +48,9 @@ class CoilGenApp(tk.Tk):
             self.notebook, self._get_output_dir, self._set_output_dir, self)
         self.notebook.add(self.pipeline_panel, text="Pipeline")
 
-        self.standalone_panel = StandalonePanel(
+        self.batch_panel = BatchPanel(
             self.notebook, self._get_output_dir, self._set_output_dir, self)
-        self.notebook.add(self.standalone_panel, text="Standalone")
+        self.notebook.add(self.batch_panel, text="Batch design")
 
         self.sweep_panel = SweepPanel(
             self.notebook, self._get_output_dir, self._set_output_dir, self)
@@ -94,6 +94,8 @@ class CoilGenApp(tk.Tk):
         self.menu_bar.entryconfigure(1, label=f"B₀: {direction.upper()}")
         if hasattr(self, 'pipeline_panel'):
             self.pipeline_panel._redraw_previews()
+        if hasattr(self, 'batch_panel'):
+            self.batch_panel._redraw_preview()
 
     def _open_field_plots(self):
         path = filedialog.askopenfilename(
@@ -118,10 +120,10 @@ class CoilGenApp(tk.Tk):
         self.menu_bar.entryconfigure(2, label=self.tr("Results"))
         self.results_menu.entryconfigure(0, label=self.tr("Open field plots..."))
         self.notebook.tab(self.pipeline_panel, text="Pipeline")
-        self.notebook.tab(self.standalone_panel, text="Standalone")
+        self.notebook.tab(self.batch_panel, text=self.tr("Batch design"))
         self.notebook.tab(self.sweep_panel, text=self.tr("Tikhonov sweep"))
         self.localizer.refresh_widget_tree(self)
-        for panel in (self.pipeline_panel, self.standalone_panel, self.sweep_panel):
+        for panel in (self.pipeline_panel, self.batch_panel, self.sweep_panel):
             retranslate = getattr(panel, "retranslate", None)
             if retranslate is not None:
                 retranslate()
@@ -155,12 +157,12 @@ class CoilGenApp(tk.Tk):
         if runner is not None and runner.is_running:
             self.after(60, self._finish_close)
             return
-        for panel in (self.pipeline_panel, self.standalone_panel, self.sweep_panel):
+        for panel in (self.pipeline_panel, self.batch_panel, self.sweep_panel):
             panel.runner.stop_polling()
         self.destroy()
 
     def on_job_state_changed(self):
-        panels = (self.pipeline_panel, self.standalone_panel, self.sweep_panel)
+        panels = (self.pipeline_panel, self.batch_panel, self.sweep_panel)
         busy = any(panel.runner is not None and panel.runner.is_running for panel in panels)
         for panel in panels:
             panel._set_running(panel.runner is not None and panel.runner.is_running)

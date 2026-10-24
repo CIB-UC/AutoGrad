@@ -10,7 +10,7 @@ Usage:
     .\.venv\Scripts\python.exe halbach_coils\run_pipeline.py --skip-gradient       # re-use a previous wire STL
     .\.venv\Scripts\python.exe halbach_coils\run_pipeline.py --skip-leads --skip-shell
 
-Outputs go to ``resultados/pipeline/G{axis}_tk{N}_lvl{M}/`` (or ``...(2)`` on
+Outputs go to ``results/pipeline/G{axis}_tk{N}_lvl{M}/`` (or ``...(2)`` on
 re-run). Each full run gets its own subfolder.
 """
 
@@ -56,7 +56,8 @@ def _coil_only_wire_paths(folder: str) -> list[str]:
     paths: set[str] = set()
     patterns = ('Gradient_*_wire_0.stl', 'Gradient_*_wire_0_?.stl')
     for pattern in patterns:
-        for wire in glob.glob(os.path.join(folder, pattern)) + glob.glob(os.path.join(folder, 'Bobina', pattern)):
+        for wire in (wire for group in ('', 'Coil', 'Bobina')
+                     for wire in glob.glob(os.path.join(folder, group, pattern))):
             if not _paths._is_derived_wire_stl(wire):
                 paths.add(wire)
     return sorted(paths)
@@ -71,7 +72,7 @@ def _seed_wire_from_previous_run(cfg: Config, run_dir: str) -> bool:
     design = cfg.design_folder
     best_wire = ''
     best_mtime = 0.0
-    for folder in glob.glob(os.path.join(_paths.PIPELINE_OUTPUT_BASE, f'{design}*')):
+    for folder in glob.glob(os.path.join(_paths.output_base(cfg.output_language), f'{design}*')):
         if not os.path.isdir(folder):
             continue
         if os.path.normpath(folder) == os.path.normpath(run_dir):
@@ -128,7 +129,7 @@ def _ensure_wire_exists(cfg: Config, run_dir: str, run_gradient: bool) -> str:
 
 
 def _run_pipeline(cfg: Config, should_stop=None, ask_user=None,
-                 question_language: str = "es", electrical_lock=None) -> PipelineResult:
+                 question_language: str = "en", electrical_lock=None) -> PipelineResult:
     """Run the configured pipeline steps and return its outcome.
 
     ``question_language`` controls the interactive congestion warning emitted
@@ -144,7 +145,7 @@ def _run_pipeline(cfg: Config, should_stop=None, ask_user=None,
         run_dir = os.path.abspath(cfg.output_dir)
         os.makedirs(run_dir, exist_ok=True)
     else:
-        run_dir = _paths.unique_run_dir(_paths.PIPELINE_OUTPUT_BASE, cfg.design_folder)
+        run_dir = _paths.unique_run_dir(_paths.output_base(cfg.output_language), cfg.design_folder)
         cfg.output_dir = run_dir
 
     print("=" * 70)
@@ -237,10 +238,12 @@ def _run_pipeline(cfg: Config, should_stop=None, ask_user=None,
 
 
 def run_pipeline(cfg: Config, should_stop=None, ask_user=None,
-                 question_language: str = "es", electrical_lock=None) -> PipelineResult:
+                 question_language: str = "en", electrical_lock=None) -> PipelineResult:
     """Run the stages, then arrange outputs and expose the final metrics."""
     from dataclasses import replace
     from coilgen.outputs import organize_outputs, relocate_paths, write_result_summary
+    from coilgen.output_layout import prepare_run_directory
+    prepare_run_directory(cfg)
 
     try:
         if electrical_lock is None:
@@ -257,11 +260,11 @@ def run_pipeline(cfg: Config, should_stop=None, ask_user=None,
         result = PipelineResult(cfg.output_dir, needs_revision=True, message=message)
     except Exception as exc:
         if cfg.output_dir and os.path.isdir(cfg.output_dir):
-            organize_outputs(cfg.output_dir)
-            write_result_summary(cfg.output_dir, error=exc)
+            organize_outputs(cfg.output_dir, language=cfg.output_language)
+            write_result_summary(cfg.output_dir, error=exc, language=cfg.output_language)
         raise
-    moves = organize_outputs(result.output_dir)
-    metrics_path = write_result_summary(result.output_dir,
+    moves = organize_outputs(result.output_dir, language=cfg.output_language)
+    metrics_path = write_result_summary(result.output_dir, language=cfg.output_language,
                                        error=result.message if result.needs_revision else None)
     return replace(result, field_plots=relocate_paths(result.field_plots, moves),
                    geometry_report_path=relocate_paths(result.geometry_report_path, moves),

@@ -34,7 +34,7 @@ def test_arrangement_preserves_provenance_reuse_and_field_artifacts(tmp_path):
     unrelated = tmp_path / 'my-notes.txt'
     unrelated.write_text('keep')
     original_digest = hashlib.sha256(wire.read_bytes()).hexdigest()
-    moves = organize_outputs(tmp_path)
+    moves = organize_outputs(tmp_path, language='es')
     resolved = Path(paths.resolve_wire_stl_path(str(tmp_path), 'x', 2500, 12))
     assert resolved == tmp_path / 'Bobina' / wire.name
     validate_design_state(resolved, cfg)
@@ -47,7 +47,7 @@ def test_arrangement_preserves_provenance_reuse_and_field_artifacts(tmp_path):
     assert Path(saved['field_plots']['data_path']).is_file()
     assert relocate_paths({'file': str(shell)}, moves)['file'] == str(tmp_path / 'Molde' / shell.name)
     assert paths.unique_stem(str(tmp_path), STEM, gradient_axis='x') == STEM + '(2)'
-    assert organize_outputs(tmp_path) == {}  # Reopening a completed result is harmless.
+    assert organize_outputs(tmp_path, language='es') == {}  # Reopening a completed result is harmless.
     copied = tmp_path / 'reused' / wire.name
     copied.parent.mkdir()
     copied.write_bytes(resolved.read_bytes())
@@ -60,7 +60,7 @@ def test_diagnostics_paths_in_final_json_are_updated(tmp_path):
     folder.mkdir()
     record = {'evidence_directory': str(folder), 'input_file': str(folder / 'final_circuit.inp')}
     (folder / 'result.json').write_text(json.dumps(record))
-    organize_outputs(tmp_path)
+    organize_outputs(tmp_path, language='es')
     saved = json.loads((tmp_path / 'Diagnostico' / folder.name / 'result.json').read_text())
     assert saved['evidence_directory'] == str(tmp_path / 'Diagnostico' / folder.name)
     assert saved['input_file'].startswith(saved['evidence_directory'])
@@ -73,7 +73,7 @@ def test_existing_files_are_not_overwritten_or_partially_moved(tmp_path):
     existing = tmp_path / 'Bobina' / file.name
     existing.write_bytes(b'previous')
     with pytest.raises(FileExistsError):
-        organize_outputs(tmp_path)
+        organize_outputs(tmp_path, language='es')
     assert file.read_bytes() == b'new'
     assert existing.read_bytes() == b'previous'
 
@@ -99,7 +99,7 @@ def test_visible_summary_and_gui_use_final_solver_values(tmp_path, status):
                            'reason': 'Solver timeout' if status == 'failed' else ''}}
     filename = tmp_path / 'Leads' / f'{STEM}_wire_0_with_leads_final_metrics.json'
     filename.write_text(json.dumps(result))
-    metrics = write_result_summary(tmp_path, stem=STEM)
+    metrics = write_result_summary(tmp_path, stem=STEM, language='es')
     summary = (tmp_path / 'Resumen.txt').read_text(encoding='utf-8')
     gui_text = electrical_result_text(metrics)
     if status == 'success':

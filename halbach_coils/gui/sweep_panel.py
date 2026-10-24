@@ -164,7 +164,7 @@ class SweepPanel(ttk.Frame):
 
     @staticmethod
     def _parse_csv_row(row: dict) -> dict:
-        parsed = dict(row)
+        parsed = sweep_mod.normalize_csv_row(row)
         for key in (
             'Tikhonov', 'Pendiente_mT_per_m_per_A', 'Error_Medio_pct',
             'RMSE_per_range_mT_per_m_per_A', 'Wire_length_m',

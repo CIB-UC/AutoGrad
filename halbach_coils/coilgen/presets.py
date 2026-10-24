@@ -19,7 +19,7 @@ PRESET_EXTENSION = '.json'
 def default_preset_dir() -> str:
     return os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'resultados', 'presets',
+        'results', 'presets',
     )
 
 
@@ -40,6 +40,7 @@ def config_to_preset(cfg: Config, *, name: str = '', source: str = 'manual') -> 
     # Runtime and machine-specific state is intentionally not portable.
     config_data.pop('output_dir', None)
     config_data.pop('show_plots', None)
+    config_data.pop('output_language', None)
     config_data['fasthenry'].pop('bin_path', None)
     # The per-axis lead preset is derived again from gradient_axis on load.
     config_data['leads'].pop('preset', None)

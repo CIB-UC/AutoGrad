@@ -15,7 +15,7 @@ from halbach_coils.coilgen import batch as batch_module
 
 
 def _batch(tmp_path=None, **changes):
-    base = Config()
+    base = Config(output_language='es')
     base.target.rx = base.target.ry = base.target.rz = .02
     base.cylinder.height = .17
     batch = BatchConfig(base=base, anchor_radius=.035, output_dir=str(tmp_path) if tmp_path else '',

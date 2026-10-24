@@ -1,8 +1,8 @@
 """
 Output path helpers for the coil-mold workflow.
 
-- ``resultados/pipeline/``  — one subfolder per full pipeline run
-- ``resultados/standalone/`` — shared folder per design (axis / Tikhonov / levels)
+- ``results/pipeline/`` — one subfolder per full pipeline run in English
+- ``results/standalone/`` — shared folder per design (axis / Tikhonov / levels)
 
 When a file or run folder already exists, the next free name uses a ``(n)``
 suffix (``(2)``, ``(3)``, ...) instead of overwriting.
@@ -14,12 +14,13 @@ import os
 import re
 
 from .geometry import internal_field_axis
+from .output_layout import name as layout_name, variants
 
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(_MODULE_DIR)
 
-STANDALONE_OUTPUT_BASE = os.path.join(PROJECT_ROOT, 'resultados', 'standalone')
-PIPELINE_OUTPUT_BASE = os.path.join(PROJECT_ROOT, 'resultados', 'pipeline')
+STANDALONE_OUTPUT_BASE = os.path.join(PROJECT_ROOT, 'results', 'standalone')
+PIPELINE_OUTPUT_BASE = os.path.join(PROJECT_ROOT, 'results', 'pipeline')
 
 ACTIVE_STEM_FILE = '.active_project_stem'
 WIRE_CAD_FILENAME = '{project}_wire_{part_index}.stl'
@@ -66,9 +67,10 @@ def unique_path(path: str) -> str:
     """Return *path* or ``stem(n).ext`` if *path* already exists."""
     def occupied(candidate):
         from .outputs import result_subfolder
-        group = result_subfolder(os.path.basename(candidate))
-        organized = os.path.join(os.path.dirname(candidate), group, os.path.basename(candidate)) if group else candidate
-        return os.path.exists(candidate) or os.path.exists(organized)
+        groups = {result_subfolder(os.path.basename(candidate), language) for language in ('en', 'es')}
+        return os.path.exists(candidate) or any(
+            os.path.exists(os.path.join(os.path.dirname(candidate), group, os.path.basename(candidate)))
+            for group in groups if group)
 
     if not occupied(path):
         return path
@@ -109,7 +111,7 @@ def unique_stem(
         return any(
             os.path.exists(os.path.join(directory, group, tpl.format(stem=s)))
             for tpl in marker_templates
-            for group in ('', 'Bobina')
+            for group in ('', *variants('coil'))
         )
 
     if not _occupied(stem):
@@ -177,7 +179,7 @@ def resolve_lead_stl_paths(wire_stl: str) -> tuple[str, str, str]:
     base, ext = os.path.splitext(wire_stl)
     directory = os.path.dirname(wire_stl) or '.'
     directories = [directory]
-    if os.path.basename(directory) == 'Bobina':
+    if os.path.basename(directory) in variants('coil'):
         directories.extend([os.path.dirname(directory), os.path.join(os.path.dirname(directory), 'Leads')])
     else:
         directories.append(os.path.join(directory, 'Leads'))
@@ -211,7 +213,8 @@ def resolve_wire_stl_path(
     import glob
 
     # Prefer new flat files while a run is in progress; completed runs are grouped.
-    organized = os.path.join(output_dir, 'Bobina')
+    organized = next((os.path.join(output_dir, group) for group in variants('coil')
+                      if os.path.isdir(os.path.join(output_dir, group))), os.path.join(output_dir, layout_name('coil')))
     if os.path.isdir(organized):
         stem = read_active_stem(output_dir, gradient_project_stem(axis, tikhonov, num_levels))
         for folder in (output_dir, organized):
@@ -273,10 +276,11 @@ def derive_align_wire_path(subtract_path: str) -> str:
     if os.path.isfile(coil_only):
         return coil_only
     if os.path.basename(os.path.dirname(subtract_path)) == 'Leads':
-        candidate = os.path.join(os.path.dirname(os.path.dirname(subtract_path)),
-                                 'Bobina', os.path.basename(coil_only))
-        if os.path.isfile(candidate):
-            return candidate
+        for group in variants('coil'):
+            candidate = os.path.join(os.path.dirname(os.path.dirname(subtract_path)),
+                                     group, os.path.basename(coil_only))
+            if os.path.isfile(candidate):
+                return candidate
     legacy = base[:-len('_with_leads')] + ext if base.endswith('_with_leads') else base
     if os.path.isfile(legacy):
         return legacy
@@ -297,3 +301,7 @@ def unique_lead_output_paths(input_stl: str) -> tuple[str, str, str]:
         if all(unique_path(path) == path for path in candidates):
             return candidates
         number += 1
+
+
+def output_base(language='en', mode='pipeline') -> str:
+    return os.path.join(PROJECT_ROOT, layout_name('results', language), mode)

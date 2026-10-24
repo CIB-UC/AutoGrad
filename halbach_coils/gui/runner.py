@@ -84,11 +84,20 @@ class WorkerRunner:
         }, on_done, ask_user, None)
 
     def _start(self, kind, cfg, extra, on_done, ask_user, on_progress):
+        language_var = getattr(self.root, 'language_var', None)
+        language = language_var.get() if language_var is not None else extra.get('question_language', 'en')
+        extra['question_language'] = language
+        target_cfg = getattr(cfg, 'base', cfg)
+        if target_cfg is not None and hasattr(target_cfg, 'output_language'):
+            target_cfg.output_language = language
         active = getattr(self.root, '_active_job_runner', None)
         if active is not None and active.is_running:
             self.log('>> A calculation is already running. Stop it before starting another.\n')
             self.start_polling()
             return False
+        if kind == 'pipeline':
+            from halbach_coils.coilgen.output_layout import prepare_run_directory
+            prepare_run_directory(cfg)
         self.root._active_job_runner = self
         self.stop_requested.clear()
         self._completion = None

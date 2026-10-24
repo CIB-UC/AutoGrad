@@ -27,7 +27,8 @@ def job_output_dir(kind, cfg, extra=None):
     extra = extra or {}
     if kind == 'sweep':
         base = extra.get('output_base_dir') or getattr(cfg, 'output_dir', '')
-        return os.path.abspath(os.path.join(base, f'Eje_{cfg.axis_label}')) if base else ''
+        from halbach_coils.coilgen.output_layout import name
+        return os.path.abspath(os.path.join(base, f"{name('axis', getattr(cfg, 'output_language', 'en'))}_{cfg.axis_label}")) if base else ''
     output_dir = getattr(cfg, 'output_dir', '')
     return os.path.abspath(output_dir) if output_dir else ''
 
@@ -57,7 +58,8 @@ def write_job_status(output_dir, status, *, kind, pid=None, error=None):
 def _update_interrupted_batch(output_dir, status, error):
     """The parent reports cancellation after the worker can no longer do so."""
     root = Path(output_dir)
-    manifest = root / 'lote.json'
+    from halbach_coils.coilgen.output_layout import locate
+    manifest = locate(root, 'batch_manifest')
     try:
         document = json.loads(manifest.read_text(encoding='utf-8'))
     except (OSError, ValueError):
@@ -102,12 +104,12 @@ def dispatch_job(kind, cfg, extra, *, ask_user, on_progress):
     if kind == 'pipeline':
         from halbach_coils.run_pipeline import run_pipeline
         return run_pipeline(cfg, ask_user=ask_user,
-                            question_language=extra.get('question_language', 'es'))
+                            question_language=extra.get('question_language', 'en'))
     if kind == 'batch':
         from halbach_coils.coilgen.batch import run_batch
         from halbach_coils.coilgen.assembly import finalize_batch
         return run_batch(cfg, ask_user=ask_user, on_progress=on_progress,
-                         question_language=extra.get('question_language', 'es'),
+                         question_language=extra.get('question_language', 'en'),
                          finalize=finalize_batch)
     if kind == 'standalone':
         from halbach_coils.coilgen.outputs import organize_outputs, relocate_paths, write_result_summary
@@ -115,8 +117,8 @@ def dispatch_job(kind, cfg, extra, *, ask_user, on_progress):
         if action == 'wire':
             from halbach_coils.coilgen.gradient import run_gradient
             _solution, metrics, overlap = run_gradient(cfg, output_dir=cfg.output_dir)
-            moves = organize_outputs(cfg.output_dir)
-            write_result_summary(cfg.output_dir)
+            moves = organize_outputs(cfg.output_dir, language=cfg.output_language)
+            write_result_summary(cfg.output_dir, language=cfg.output_language)
             return relocate_paths(metrics.get('field_plots'), moves), overlap
         input_stl = extra.get('input_stl', '')
         if not input_stl or not os.path.isfile(input_stl):
@@ -128,17 +130,17 @@ def dispatch_job(kind, cfg, extra, *, ask_user, on_progress):
             validate_design_state(input_stl, cfg)
             paths = run_leads(cfg, input_stl=input_stl)
             final = evaluate_final_conductor(cfg, input_stl, paths[0], cfg.output_dir)
-            moves = organize_outputs(cfg.output_dir)
+            moves = organize_outputs(cfg.output_dir, language=cfg.output_language)
             stem = os.path.basename(input_stl).rsplit('_wire_0', 1)[0]
-            write_result_summary(cfg.output_dir, stem=stem)
+            write_result_summary(cfg.output_dir, stem=stem, language=cfg.output_language)
             return relocate_paths({'paths': paths, 'field_plots': final['field_plots'],
                                    'metrics_path': final['metrics_path']}, moves), None
         if action == 'shell':
             from halbach_coils.coilgen.shell import run_shell
             _output, paths = run_shell(cfg, wire_with_leads_stl=input_stl,
                                        output_dir=cfg.output_dir)
-            moves = organize_outputs(cfg.output_dir)
-            write_result_summary(cfg.output_dir)
+            moves = organize_outputs(cfg.output_dir, language=cfg.output_language)
+            write_result_summary(cfg.output_dir, language=cfg.output_language)
             return relocate_paths(paths, moves), None
         raise ValueError(f'Unknown standalone action: {action}')
     if kind == 'sweep':

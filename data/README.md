@@ -21,7 +21,7 @@ configuration. The upstream datasets are not manufactured Halbach outputs.
 
 Add a file here only when it is reusable engine input rather than a result from
 one Halbach design run. Generated coils, shells, metrics, and sweep tables belong
-under `halbach_coils/resultados/`, which is ignored by Git.
+under `halbach_coils/results/`, which is ignored by Git.
 
 The printable Halbach shell halves used by the GUI are application assets and
 live in `halbach_coils/assets/shells/`, not here.

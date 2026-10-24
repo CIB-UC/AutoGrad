@@ -34,6 +34,7 @@ Desktop.ini
 *.bak
 
 # Generated runs and local working material
+results/
 resultados/
 resultados_*/
 output/
@@ -51,10 +52,6 @@ _backup*/
 _backups*/
 *_BACKUP/
 /local_exports/
-
-# Machine-specific recovery notes; technical reports live in docs/
-/docs/REINICIO_Y_REVISION_2026-10-13.md
-/docs/CORRECCIONES_2026-10-14.md
 
 # Generated numerical checkpoints, meshes and duplicate archives
 *.pickle

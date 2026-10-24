@@ -23,6 +23,8 @@ from typing import Callable
 import numpy as np
 
 from .config import Config, preset_for
+from .output_layout import name, locate, variants
+from .paths import output_base
 from .paths import PIPELINE_OUTPUT_BASE, unique_run_dir
 
 
@@ -213,7 +215,8 @@ def _layer_record(cfg: Config, index: int) -> dict:
 
 def _write_report(root: Path, document: dict) -> tuple[str, str]:
     complete_gap = document.get('format_version', 1) >= 2
-    manifest = root / 'lote.json'
+    language = document.get('output_language', 'es')
+    manifest = root / name('batch_manifest', language)
     temporary = manifest.with_suffix('.json.tmp')
     temporary.write_text(json.dumps(document, indent=2, ensure_ascii=False,
                                     allow_nan=False) + '\n', encoding='utf-8')
@@ -227,6 +230,14 @@ def _write_report(root: Path, document: dict) -> tuple[str, str]:
             if os.name != 'nt' or getattr(exc, 'winerror', None) not in (5, 32, 33) or attempt == 5:
                 raise
             time.sleep(.02 * (attempt + 1))
+    lines = _spanish_report_lines(document) if language == 'es' else _english_report_lines(document)
+    summary = root / name('batch_summary', language)
+    summary.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    return str(summary), str(manifest)
+
+
+def _spanish_report_lines(document):
+    complete_gap = document.get('format_version', 1) >= 2
     lines = [
         'CONJUNTO DE GRADIENTES ' + ' / '.join('G' + layer['axis'].upper()
                                               for layer in document['layers']),
@@ -290,13 +301,54 @@ def _write_report(root: Path, document: dict) -> tuple[str, str]:
         lines.extend(['', 'Motivo: ' + document['error']])
     if document['status'] != 'complete':
         lines.extend(['', 'El conjunto está incompleto. No se debe tratar como un ensamble terminado.'])
-    summary = root / 'Resumen_lote.txt'
-    summary.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-    return str(summary), str(manifest)
+    return lines
+
+
+def _english_report_lines(document):
+    lines = [
+        'GRADIENT ASSEMBLY ' + ' / '.join('G' + layer['axis'].upper() for layer in document['layers']),
+        'Status: ' + document['status'],
+        'Gradient generation: ' + ('parallel, one process per gradient' if document.get('parallel_gradients') else 'sequential'),
+        'Inside-to-outside order: ' + ' → '.join('G' + item['axis'].upper() for item in document['layers']),
+        'Shared B0: ' + document['b0_direction'].upper(),
+        'B0 marks: ' + ('enabled' if document.get('include_b0_markers') else 'disabled'),
+        f"Anchor radius ({document['radius_mode']}): {document['anchor_radius_m'] * 1000:.6g} mm",
+        f"Mold inner / outer radius: {document['shell_inner_radius_m'] * 1000:.6g} / {document['shell_outer_radius_m'] * 1000:.6g} mm",
+        f"Estimated wire inner radius: {document['wire_inner_radius_m'] * 1000:.6g} mm",
+        f"Radial gap: {document['radial_gap_m'] * 1000:.6g} mm",
+        'The gap separates complete gradient envelopes, including cable and grooves.',
+        'Plastic mold radii are reported separately.', '',
+    ]
+    if document.get('requires_interference_check'):
+        lines.extend(['Real 3D clearance must be checked before completing the assembly.', ''])
+    for layer in document['layers']:
+        inner = layer.get('gradient_inner_radius_m', min(layer['shell_inner_radius_m'], layer['wire_inner_radius_m']))
+        outer = layer.get('gradient_outer_radius_m', max(layer['shell_outer_radius_m'], layer['wire_outer_radius_m']))
+        lines.extend([
+            f"{layer['directory']}/: {layer['status']}",
+            f"  Complete gradient inner / outer radius: {inner * 1000:.6g} / {outer * 1000:.6g} mm",
+            f"  Mold inner / outer radius: {layer['shell_inner_radius_m'] * 1000:.6g} / {layer['shell_outer_radius_m'] * 1000:.6g} mm",
+            f"  Wire envelope: {layer['wire_inner_radius_m'] * 1000:.6g} / {layer['wire_outer_radius_m'] * 1000:.6g} mm",
+            f"  Tikhonov: {layer['tikhonov_factor']:.8g}; levels: {layer['num_levels']}",
+            f"  Cable: {layer['conductor_width_m'] * 1000:.6g} mm; crossing gap: {layer['layer_crossing_gap_m'] * 1000:.6g} mm; wall: {layer['shell_wall_thickness_m'] * 1000:.6g} mm",
+            '  See the layer Summary.txt for final field, resistance and inductance.',
+        ])
+        if layer.get('error'): lines.append('  Reason: ' + layer['error'])
+    if document.get('assembly'):
+        lines.extend(['', 'VALIDATED ASSEMBLY',
+                      f"Assembly/: {len(document['layers'])} final mold STLs in mm, Gradients.glb and keys.json.",
+                      'Use the STLs in Assembly/ for manufacture.'])
+        markers = document['assembly'].get('b0_markers', {})
+        if markers.get('enabled'): lines.append(f"Aligned B0 marks: {markers['angle_deg']:.6g}°.")
+        for interface in document['assembly'].get('interfaces', ()):
+            lines.append(f"  G{interface['inner_axis'].upper()} → G{interface['outer_axis'].upper()}: {interface['angle_deg']:.6g}°; side clearance {interface['side_clearance_mm']:.6g} mm; axial clearance {interface['axial_clearance_mm']:.6g} mm.")
+    if document.get('error'): lines.extend(['', 'Reason: ' + document['error']])
+    if document['status'] != 'complete': lines.extend(['', 'The assembly is incomplete. Do not treat it as a finished assembly.'])
+    return lines
 
 
 def run_batch(batch: BatchConfig, should_stop=None, ask_user=None,
-              question_language='es', on_progress=None,
+              question_language='en', on_progress=None,
               finalize: Callable | None = None) -> BatchResult:
     """Run selected axes, retaining expected geometry failures for revision.
 
@@ -315,10 +367,10 @@ def run_batch(batch: BatchConfig, should_stop=None, ask_user=None,
         from .assembly import finalize_batch
         finalize = finalize_batch
     root = Path(batch.output_dir).resolve() if batch.output_dir else Path(
-        unique_run_dir(PIPELINE_OUTPUT_BASE, 'Lote_' + '_'.join(
+        unique_run_dir(output_base(batch.base.output_language), name('batch', batch.base.output_language) + '_' + '_'.join(
             'G' + axis for axis in 'xyz' if axis in {cfg.gradient_axis for cfg in configs})))
     # A new batch never reuses/overwrites results from an earlier batch.
-    if (root / 'lote.json').exists() or any((root / f'{i + 1:02d}_G{cfg.gradient_axis}').exists()
+    if any((root / item).exists() for item in variants('batch_manifest')) or any((root / f'{i + 1:02d}_G{cfg.gradient_axis}').exists()
                                           for i, cfg in enumerate(configs)):
         raise FileExistsError('The batch output folder already contains a batch; choose a new folder.')
     root.mkdir(parents=True, exist_ok=True)
@@ -327,6 +379,7 @@ def run_batch(batch: BatchConfig, should_stop=None, ask_user=None,
     configs = build_layer_configs(working_batch)
     document = {
         'format_version': 2,
+        'output_language': batch.base.output_language,
         'coordinate_frame': 'physical_xyz',
         'status': 'running',
         'b0_direction': configs[0].b0_direction,
@@ -409,7 +462,7 @@ def run_batch(batch: BatchConfig, should_stop=None, ask_user=None,
                     if on_progress:
                         on_progress('batch', len(results), 'needs_revision', layer)
                     continue
-                if not any((Path(result.output_dir) / 'Molde').glob('*.stl')):
+                if not any(locate(result.output_dir, 'mold').glob('*.stl')):
                     raise RuntimeError(f'{cfg.axis_label} did not produce a completed shell.')
                 if not result.metrics_path or not Path(result.metrics_path).is_file():
                     raise RuntimeError(f'{cfg.axis_label} did not produce final-conductor metrics.')

@@ -38,7 +38,7 @@ def test_rejecting_collision_result_stops_before_leads_and_shell(tmp_path, monke
     assert result.discarded is True
     assert calls == []
     assert len(questions) == 1
-    assert "Hay 3 cables intentando pasar por el mismo lugar" in questions[0]
+    assert "3 cables are trying to pass through the same location" in questions[0]
 
 
 def test_accepting_collision_result_continues_with_leads_and_shell(tmp_path, monkeypatch):
@@ -69,7 +69,7 @@ def test_accepting_collision_result_continues_with_leads_and_shell(tmp_path, mon
 ])
 def test_measured_interference_stops_before_an_unfulfillable_continue_prompt(
         tmp_path, monkeypatch, language, description):
-    cfg = Config(show_plots=False)
+    cfg = Config(show_plots=False, output_language=language)
     cfg.output_dir = str(tmp_path)
     report = OverlapReport(sites=[CollisionSite(
         part_index=0, location_uv=(0., 0.), cable_count=2,
@@ -89,7 +89,9 @@ def test_measured_interference_stops_before_an_unfulfillable_continue_prompt(
     assert result.needs_revision
     assert description in result.message
     assert result.metrics_path is None
-    assert 'Ejecución incompleta' in (tmp_path / 'Resumen.txt').read_text(encoding='utf-8')
+    from halbach_coils.coilgen.output_layout import name
+    summary = (tmp_path / name('summary', language)).read_text(encoding='utf-8')
+    assert ('Incomplete run' if language == 'en' else 'Ejecución incompleta') in summary
     assert calls == []
     assert '1.5 mm' in report.user_question(language)
     assert '2 mm' in report.user_question(language)

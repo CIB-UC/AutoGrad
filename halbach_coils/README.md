@@ -25,6 +25,10 @@ for the current session. The **B₀** menu selects the signed main-field directi
 GUI lengths are in **mm**. CLI and `Config` lengths are in **m**. Defaults differ
 between GUI and CLI, so pass geometry explicitly when comparing runs.
 
+New output folders, summaries, batch manifests and sweep exports follow the GUI
+language at job launch. Older results keep their original layout and can be
+opened from either interface language. See [output language](../docs/OUTPUT_LAYOUT.md).
+
 ## Directory guide
 
 | Path | Purpose |
@@ -34,7 +38,7 @@ between GUI and CLI, so pass geometry explicitly when comparing runs.
 | `assets/shells/` | Tracked matching STL halves discovered by the GUI |
 | `run_pipeline.py` | Non-interactive pipeline entry point |
 | `run_gui.py` | Graphical entry point |
-| `resultados/` | Generated run directories; ignored by Git |
+| `results/` | Default generated run directories in English; ignored by Git |
 
 Retired scripts may remain in a local `obsolete/` folder. They are excluded from
 the publication branch and are not required by the application or its tests.
@@ -66,9 +70,9 @@ the publication branch and are not required by the application or its tests.
   fine phase starts after all coarse calculations finish. The CLI accepts the
   same setting through `--processes`.
 
-`Resumen.txt` and `Leads/*_final_metrics.json` describe the final conductor,
-including both terminal leads. `Bobina/*_metrics.txt` describes the original
-wire before leads. For batch manufacture use the final STLs in `Conjunto/`;
+`Summary.txt` and `Leads/*_final_metrics.json` describe the final conductor,
+including both terminal leads. `Coil/*_metrics.txt` describes the original
+wire before leads. For batch manufacture use the final STLs in `Assembly/`;
 the numbered layer folders retain individual pipeline outputs. Preserve the
 entire run folder, including sidecars, when sharing a result outside Git.
 
@@ -105,7 +109,7 @@ Geometry or winding changes require a new run. Mouse-wheel zoom works in 3D view
 
 Starting parameters are examples, not validated manufacturing presets. The
 current detector checks real cable distances in 3D and can reject geometries
-that older versions accepted. Read [validation and limitations](../docs/VALIDACION.md)
+that older versions accepted. Read [validation and limitations](../docs/VALIDATION.md)
 before interpreting a completed optimisation as a usable assembly.
 
 ## Shell asset convention
@@ -116,13 +120,13 @@ the pair appears in the GUI. Restart the GUI after adding a pair.
 
 Keep only reusable input halves in this directory. `.gitignore` explicitly
 allows these STL inputs while excluding generated meshes elsewhere. A duplicate
-`assets/shells.zip` is not needed. Generated runs belong under `resultados/` or
+`assets/shells.zip` is not needed. Generated runs belong under `results/` or
 an output directory outside the checkout.
 
 STL has no unit metadata. Set the input-unit option correctly for custom halves;
 default exports are in mm. For a one-piece generated cylinder, no input STL is
 required. A batch's keys have a default 0.3 mm clearance per side and at the
-axial stop; see [batch dimensions and assembly](../docs/LOTE_Y_ENCAJES.md).
+axial stop; see [batch dimensions and assembly](../docs/BATCH_AND_ASSEMBLY.md).
 
 ## B0 orientation marks
 
@@ -143,7 +147,7 @@ reports an error before exporting shells; it never moves the mark away from B0.
 
 Batch Design has a single **Add aligned B₀ marks to all three gradients** checkbox,
 enabled initially (`BatchConfig.include_b0_markers` for Python callers). Batch
-marks are added together to the three final STL files in `Conjunto/`, after the
+marks are added together to the three final STL files in `Assembly/`, after the
 individual pipelines finish. All marks use the same side and angular position
 of the shared physical B0 axis. If that side is occupied on any layer, the
 opposite side is tried for all three; if neither side fits all layers, the
@@ -152,7 +156,7 @@ assembly reports an error. Individual pipeline files remain unchanged.
 Key placement reserves the marks' angular region with automatic clearance,
 so neither a male key nor a receiving slot can occupy it. This also works with
 keys disabled and with axial B0. The final shared position is saved in
-`Conjunto/encajes.json` and shown in the batch preview.
+`Assembly/keys.json` and shown in the batch preview.
 
 ## Where to make changes
 

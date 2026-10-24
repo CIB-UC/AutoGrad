@@ -66,7 +66,7 @@ def test_sweep_runs_coarse_and_fine_passes_and_writes_summaries(
     with open(result.csv_path, newline='', encoding='utf-8') as fh:
         csv_rows = list(csv.DictReader(fh))
     assert len(csv_rows) == 4
-    assert 'MEJOR PENDIENTE' in open(
+    assert 'Best absolute slope' in open(
         result.txt_path, encoding='utf-8').read()
     saved_cfg = load_config_preset(result.config_preset_path)
     assert saved_cfg.gradient_axis == 'x'
@@ -128,7 +128,7 @@ def test_no_feasible_results_are_saved_without_a_false_recommendation(monkeypatc
     assert result.rows
     with open(result.csv_path, encoding='utf-8', newline='') as handle:
         assert len(list(csv.DictReader(handle))) == len(result.rows)
-    assert 'No hay un diseño recomendado' in open(result.txt_path, encoding='utf-8').read()
+    assert 'No design is recommended' in open(result.txt_path, encoding='utf-8').read()
 
 
 def test_fine_search_stays_inside_the_requested_range(monkeypatch, tmp_path):

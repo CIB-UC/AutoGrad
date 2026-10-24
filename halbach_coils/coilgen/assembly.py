@@ -184,7 +184,8 @@ def _roi_solid(cfg):
 
 
 def _one_output(root, group, pattern, label):
-    folder = root / group
+    from .output_layout import locate
+    folder = locate(root, group)
     candidates = sorted(folder.glob(pattern)) if folder.is_dir() else sorted(root.glob(pattern))
     if len(candidates) != 1:
         raise RuntimeError(f'{label}: expected one {pattern} in {folder}; found {len(candidates)}.')
@@ -195,8 +196,8 @@ def _load_layer(cfg, result):
     root = Path(result.output_dir).resolve()
     if getattr(result, 'discarded', False):
         raise RuntimeError(f'G{cfg.gradient_axis.upper()} was discarded; assembly cannot be completed.')
-    conductor_path = _one_output(root, 'Leads', '*_with_leads*.stl', 'Final conductor')
-    former_path = _one_output(root, 'Molde', '*.stl', 'Former')
+    conductor_path = _one_output(root, 'leads', '*_with_leads*.stl', 'Final conductor')
+    former_path = _one_output(root, 'mold', '*.stl', 'Former')
     if any(infer_gradient_axis(str(path)) not in (None, cfg.gradient_axis)
            for path in (conductor_path, former_path)):
         raise RuntimeError(f'G{cfg.gradient_axis.upper()}: output filenames belong to a different gradient axis.')
@@ -401,7 +402,11 @@ def finalize_batch(batch, configs, results):
         raise ValueError('Assembly requires a completed pipeline result for each selected gradient.')
     root = Path(batch.output_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    destination = root / 'Conjunto'
+    from .output_layout import name, variants
+    language = configs[0].output_language
+    destination = root / name('assembly', language)
+    if any((root / item).exists() for item in variants('assembly')):
+        raise FileExistsError('Assembly already exists; refusing to overwrite.')
     if destination.exists():
         raise FileExistsError(f'Assembly already exists; refusing to overwrite: {destination}')
     loaded = [_load_layer(cfg, result) for cfg, result in zip(configs, results)]
@@ -416,14 +421,14 @@ def finalize_batch(batch, configs, results):
         print('  Checking assembly key positions against all final conductors...', flush=True)
         formers, interfaces = _choose_keys(batch, configs, formers, conductors, marker_keepouts)
 
-    staging = Path(tempfile.mkdtemp(prefix='.conjunto-', dir=root))
+    staging = Path(tempfile.mkdtemp(prefix='.assembly-', dir=root))
     try:
         part_paths, exported, scene = {}, [], trimesh.Scene()
         for cfg, former in zip(configs, formers):
-            name = f'G{cfg.gradient_axis}_molde.stl'
-            mesh = export_validated_shell_stl(trimesh_from_manifold(former), staging / name)
+            filename = f"G{cfg.gradient_axis}_{'molde' if language == 'es' else 'mold'}.stl"
+            mesh = export_validated_shell_stl(trimesh_from_manifold(former), staging / filename)
             exported.append(_solid(mesh, f'G{cfg.gradient_axis.upper()} exported former', one_part=True))
-            part_paths[cfg.gradient_axis] = str(destination / name)
+            part_paths[cfg.gradient_axis] = str(destination / filename)
             display = mesh.copy()
             display.vertices *= .001
             display.visual.face_colors = PART_COLORS[cfg.gradient_axis]
@@ -432,7 +437,7 @@ def finalize_batch(batch, configs, results):
         scene.metadata.update({'units': 'm', 'coordinate_frame': 'physical_xyz',
                                'longitudinal_axis': 'z'})
         scene.units = 'm'
-        scene_name, report_name = 'Gradientes.glb', 'encajes.json'
+        scene_name, report_name = name('scene', language), name('keys', language)
         (staging / scene_name).write_bytes(scene.export(file_type='glb'))
         reloaded = trimesh.load(staging / scene_name, force='scene')
         if len(reloaded.geometry) != len(configs) or not np.allclose(reloaded.bounds, scene.bounds, atol=1e-7):

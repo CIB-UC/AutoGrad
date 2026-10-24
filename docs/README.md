@@ -1,26 +1,27 @@
-# Documentación técnica de AutoGrad
+# AutoGrad technical documentation
 
-La instalación y los comandos vigentes están en el [README principal](../README.md).
-Los detalles de la interfaz, las marcas B₀ y las entradas STL están en el
-[README de la aplicación](../halbach_coils/README.md).
+Use the [main README](../README.md) for installation and current commands.
+The [application README](../halbach_coils/README.md) covers GUI controls, B0 marks
+and shell inputs.
 
-| Documento | Contenido |
+| Document | Contents |
 | --- | --- |
-| [B0_FRAME.md](B0_FRAME.md) | Marco XYZ físico, componente firmada, signos y compatibilidad con diseños anteriores. |
-| [VALIDACION.md](VALIDACION.md) | Alcance de las pruebas, hallazgos recientes y límites del conjunto simulado. |
-| [CRUCES_Y_VALIDACION.md](CRUCES_Y_VALIDACION.md) | Corrección de rampas de cruce y reproducción del lote GX/GY con los parámetros originales. |
-| [ROBUSTEZ_GEOMETRICA.md](ROBUSTEZ_GEOMETRICA.md) | Separación automática de vueltas, barrido con validación geométrica y recuperación de resultados inviables. |
-| [LOTE_Y_ENCAJES.md](LOTE_Y_ENCAJES.md) | Radios completos y de plástico, separación de gradientes, encajes y verificaciones históricas. |
-| [SALIDAS_Y_FASTHENRY.md](SALIDAS_Y_FASTHENRY.md) | Organización de resultados y métricas antes y después de los terminales. |
-| [CIERRE_GZ_Y_CANCELACION.md](CIERRE_GZ_Y_CANCELACION.md) | Verificación histórica del trazado Gz y del cierre de procesos FastHenry. |
-| [PUBLICACION.md](PUBLICACION.md) | Rama local preparada y comandos para subirla al repositorio de CIB-UC. |
-| [CONTRIBUTING.md](../CONTRIBUTING.md) | Convenciones, archivos versionables y comprobaciones para cambios futuros. |
-| [Datos del motor](../data/README.md) | Entradas reutilizables y fixtures binarios incluidos. |
+| [B0_FRAME.md](B0_FRAME.md) | Physical XYZ, signed components, polarity and older designs. |
+| [OUTPUT_LAYOUT.md](OUTPUT_LAYOUT.md) | GUI-dependent output names, saved language and historical compatibility. |
+| [VALIDATION.md](VALIDATION.md) | Automated verification, engineering findings and limitations. |
+| [CROSSING_VALIDATION.md](CROSSING_VALIDATION.md) | Crossing-ramp correction and the original Gx/Gy batch reproduction. |
+| [GEOMETRY_RECOVERY.md](GEOMETRY_RECOVERY.md) | Turn spacing, route recovery, clearance-aware sweeps and partial results. |
+| [BATCH_AND_ASSEMBLY.md](BATCH_AND_ASSEMBLY.md) | Complete/plastic radii, gaps, keys and historical CAD checks. |
+| [OUTPUTS_AND_FASTHENRY.md](OUTPUTS_AND_FASTHENRY.md) | Output organization and pre-lead versus final electrical metrics. |
+| [GZ_ROUTING_AND_CANCELLATION.md](GZ_ROUTING_AND_CANCELLATION.md) | Historical Gz routing and owned FastHenry process cleanup. |
+| [PUBLICATION.md](PUBLICATION.md) | Prepared branch, review checks and maintainer-approved upload. |
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | Conventions, versioned inputs and checks for future changes. |
+| [Engine data](../data/README.md) | Reusable datasets and binary fixtures. |
 
-Los informes fechados registran una versión, configuración y ejecución concretas.
-Sus conteos de pruebas y valores eléctricos son evidencia histórica; no son
-predicciones para todos los diseños ni sustituyen una ejecución actual. Las
-mediciones físicas deben distinguirse de simulaciones y comprobaciones CAD.
+Dated reports describe particular versions, configurations and runs. Their test
+counts and electrical values are historical evidence, not predictions for all
+designs. Distinguish physical measurements from simulation and CAD checks.
 
-Los resultados voluminosos, scripts experimentales y notas de recuperación de
-una máquina se conservan localmente y se excluyen de la rama de publicación.
+Large results, experimental scripts and machine-recovery notes remain local and
+are excluded from publication. Documentation is in English; Spanish strings in
+runtime localization and legacy artifact names are retained intentionally.

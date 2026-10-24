@@ -59,6 +59,26 @@ class _Text:
         pass
 
 
+@pytest.mark.parametrize('language', ['en', 'es'])
+@pytest.mark.parametrize('kind', ['pipeline', 'batch', 'sweep'])
+def test_gui_language_is_captured_before_serializing_a_job(monkeypatch, language, kind):
+    from halbach_coils.coilgen.config import Config
+    from halbach_coils.coilgen.batch import BatchConfig
+    root = _Root()
+    root.language_var = SimpleNamespace(get=lambda: language)
+    runner = WorkerRunner(_Text(), None, root)
+    cfg = BatchConfig() if kind == 'batch' else Config()
+    captured = []
+    def serialize(value):
+        captured.append(value)
+        raise TypeError('Stop before launching the test worker')
+    monkeypatch.setattr(runner_module.pickle, 'dumps', serialize)
+    assert not runner.run_job(kind, cfg)
+    _kind, saved_cfg, extra = captured[0]
+    target = saved_cfg.base if kind == 'batch' else saved_cfg
+    assert target.output_language == extra['question_language'] == language
+
+
 def _spin(root, condition, timeout=12):
     deadline = time.monotonic() + timeout
     while not condition() and time.monotonic() < deadline:
@@ -259,7 +279,7 @@ def test_sweep_progress_is_delivered_by_main_thread_poll():
 
 def test_sweep_marker_path_matches_actual_axis_directory(tmp_path):
     cfg = SimpleNamespace(output_dir=str(tmp_path), axis_label='GZ')
-    assert job_output_dir('sweep', cfg, {'output_base_dir': str(tmp_path)}) == str(tmp_path / 'Eje_GZ')
+    assert job_output_dir('sweep', cfg, {'output_base_dir': str(tmp_path)}) == str(tmp_path / 'Axis_GZ')
     write_job_status(str(tmp_path), 'cancelled', kind='pipeline', pid=123)
     marker = json.loads((tmp_path / JOB_STATUS_FILENAME).read_text())
     assert marker['partial'] is True

@@ -330,11 +330,14 @@ class Config:
     advanced: AdvancedConfig = field(default_factory=AdvancedConfig)
 
     output_dir: str = ''                       # run output folder
+    output_language: str = 'en'                # presentation only; GUI snapshots its language
     show_plots: bool = True
     overlap_warn: bool = True                  # verbose diagnostics; physical checks always run
     overlap_clearance: float = 1.0             # multiplier for multi-wire zone footprint
 
     def __post_init__(self) -> None:
+        if self.output_language not in ('en', 'es'):
+            raise ValueError('Output language must be en or es.')
         if self.gradient_axis.lower() not in ('x', 'y', 'z'):
             raise ValueError(f"gradient_axis must be 'x', 'y' or 'z', got {self.gradient_axis!r}")
         self.gradient_axis = self.gradient_axis.lower()

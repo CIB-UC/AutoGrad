@@ -49,11 +49,11 @@ FastHenry extraction remains serial. A known geometric failure produces a
 `needs_revision` result with its files and diagnostics retained. Other selected
 axes can finish, but the assembly requires valid results from every included axis.
 Sweep recommendations use only geometrically valid rows with finite metrics.
-See [geometry recovery and result states](docs/ROBUSTEZ_GEOMETRICA.md).
+See [geometry recovery and result states](docs/GEOMETRY_RECOVERY.md).
 
 This is an engineering design tool. A completed numerical run does not certify
 field linearity, winding feasibility or printed fit. Review final field and
-geometry reports before manufacture. The [validation notes](docs/VALIDACION.md)
+geometry reports before manufacture. The [validation notes](docs/VALIDATION.md)
 describe the tested cases and their limits, including collisions found with
 starting parameters and the field error of a geometrically valid example.
 
@@ -95,7 +95,7 @@ Final metrics distinguish analytical `R = ρL/A` from FastHenry R/L and record
 solver status. The electrical model uses the real cable area; FastHenry uses an
 equal-area square approximation. External supply/return wiring and mutual
 inductance between gradients are outside this model. See
-[outputs and FastHenry](docs/SALIDAS_Y_FASTHENRY.md).
+[outputs and FastHenry](docs/OUTPUTS_AND_FASTHENRY.md).
 
 ## Running from a terminal
 
@@ -120,7 +120,7 @@ direction uses the equals form, for example `--b0=-y`.
 | --- | --- |
 | `--axis x\|y\|z` | Physical gradient axis. |
 | `--b0=+y` | Signed main-field direction; all six axis directions are supported. |
-| `--output-dir PATH` | Output location; otherwise a new run directory is created under `halbach_coils/resultados/pipeline/`. |
+| `--output-dir PATH` | Output location; otherwise a new run directory is created under `halbach_coils/results/pipeline/`. |
 | `--no-plots` | Disable interactive plots. |
 | `--skip-gradient` | Reuse a compatible wire and its provenance sidecars. |
 | `--skip-leads`, `--skip-shell` | Omit the corresponding stage. |
@@ -149,32 +149,37 @@ Reusable shell inputs live in `halbach_coils/assets/shells/`, as matching
 generate a one-piece cylindrical former. The [application README](halbach_coils/README.md)
 details shell selection, B₀ marks, advanced controls and the batch workflow.
 
-Generated results normally live under `halbach_coils/resultados/` and are ignored
+Generated results normally live under `halbach_coils/results/` and are ignored
 by Git. Use an output directory outside the source tree for long studies. Custom
 output paths inside the repository must also be reviewed before committing.
+
+New results use the GUI language selected when the job starts. The English layout
+is shown below; Spanish sessions use localized folder and summary names. Existing
+results keep their original names when reopened in either language. Command-line
+and Python runs default to English. See [output language and compatibility](docs/OUTPUT_LAYOUT.md).
 
 A completed individual Pipeline run uses this layout:
 
 ```text
 run/
-├── Resumen.txt       # Final field/electrical summary and FastHenry status
-├── Molde/            # Manufacturing shell STL(s)
+├── Summary.txt       # Final field/electrical summary and FastHenry status
+├── Mold/             # Manufacturing shell STL(s)
 ├── Leads/            # Final conductor, terminal paths, field data and metrics
-├── Graficos/         # Final PNG plots; CoilGen/ holds pre-lead plots
-├── Bobina/           # Original wire and configuration/reference sidecars
-└── Diagnostico/      # Solver inputs, raw results and diagnostics
+├── Plots/            # Final PNG plots; CoilGen/ holds pre-lead plots
+├── Coil/             # Original wire and configuration/reference sidecars
+└── Diagnostics/      # Solver inputs, raw results and diagnostics
 ```
 
 Keep the complete run folder to reproduce or reuse a design. Configuration and
 sidecar hashes are checked; older wires without provenance must be regenerated.
-`Bobina/*_metrics.txt` describes the wire **before leads**; read `Resumen.txt` or
+`Coil/*_metrics.txt` describes the wire **before leads**; read `Summary.txt` or
 `Leads/*_final_metrics.json` for final values.
 
-Batch runs add `Resumen_lote.txt`, `lote.json` and numbered layer directories
+Batch runs add `Batch_summary.txt`, `batch.json` and numbered layer directories
 in the selected order (initially Gz → Gx → Gy). Only a successful final geometry
-check publishes `Conjunto/`, containing assembly mould STLs, `Gradientes.glb`
-and `encajes.json`. Use those STLs for assembly. See
-[batch dimensions and keys](docs/LOTE_Y_ENCAJES.md).
+check publishes `Assembly/`, containing assembly mould STLs, `Gradients.glb`
+and `keys.json`. Use those STLs for assembly. See
+[batch dimensions and keys](docs/BATCH_AND_ASSEMBLY.md).
 
 Field viewers open after completed designs. Reopen data with **Results > Open
 field plots...**; B₀ comes from the saved result. Sweeps save CSV/text summaries
@@ -204,7 +209,7 @@ AutoGrad/
 Local environments, results, experimental scripts, archives, backups and retired
 application code are excluded from the publication branch. Required STL/NumPy
 inputs remain versioned through explicit `.gitignore` exceptions. See
-[contributing](CONTRIBUTING.md) and the [publication guide](docs/PUBLICACION.md).
+[contributing](CONTRIBUTING.md) and the [publication guide](docs/PUBLICATION.md).
 
 ## Troubleshooting
 

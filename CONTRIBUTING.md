@@ -65,7 +65,7 @@ git diff --cached --stat
 An ignore rule does not remove files already tracked by Git. The prepared
 publication branch was built with a clean index, so it excludes local historical
 material even when that material remains tracked on the original local branch.
-See [PUBLICACION.md](docs/PUBLICACION.md) for the initial upload.
+See [PUBLICATION.md](docs/PUBLICATION.md) for the initial upload.
 
 ## Attribution
 

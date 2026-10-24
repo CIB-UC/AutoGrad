@@ -33,6 +33,8 @@ from typing import Callable, List, Optional
 import numpy as np
 
 from .config import Config
+from .output_layout import name
+from .paths import output_base
 from .gradient import run_gradient
 from .presets import save_config_preset
 
@@ -116,9 +118,22 @@ def _fmt_val(v, fmt='.6g'):
         return str(v)
 
 
-def _write_csv(path: str, rows: List[dict]) -> None:
+CSV_ENGLISH_NAMES = {'Fase': 'Phase', 'Pendiente_mT_per_m_per_A': 'Slope_mT_per_m_per_A',
+                     'Error_Medio_pct': 'Mean_error_pct'}
+
+
+def normalize_csv_row(row: dict) -> dict:
+    """Read English headers and historical identifiers without changing saved data."""
+    aliases = {english: legacy for legacy, english in CSV_ENGLISH_NAMES.items()}
+    return {aliases.get(key, key): value for key, value in row.items()}
+
+
+def _write_csv(path: str, rows: List[dict], language='en') -> None:
     if not rows:
         return
+    if language == 'en':
+        rows = [{CSV_ENGLISH_NAMES.get(key, key): value for key, value in row.items()}
+                for row in rows]
     fields = list(rows[0].keys())
     with open(path, 'w', newline='', encoding='utf-8') as fh:
         writer = csv.DictWriter(fh, fieldnames=fields)
@@ -129,6 +144,22 @@ def _write_csv(path: str, rows: List[dict]) -> None:
 
 def _write_txt(path: str, cfg: Config, rows: List[dict],
                best_slope: dict | None, best_error: dict | None) -> None:
+    if cfg.output_language == 'en':
+        with open(path, 'w', encoding='utf-8') as fh:
+            fh.write(f"Tikhonov sweep summary — {cfg.axis_label}\n")
+            fh.write(f"B0={cfg.b0_direction}; component={cfg.field_component_label}; frame=physical_XYZ\n")
+            fh.write(f"Outer radius={cfg.cylinder.radius} m; height={cfg.cylinder.height} m; levels={cfg.num_levels}\n")
+            fh.write('Winding clearance is checked here; leads and assembly require the full pipeline.\n')
+            fh.write('Phase\tTikhonov\tSlope[mT/(m.A)]\tMean error[%]\tRMSE/range\tGeometry\n')
+            for row in rows:
+                phase = {'Grueso': 'Coarse', 'Fino': 'Fine'}.get(row['Fase'], row['Fase'])
+                fh.write(f"{phase}\t{row['Tikhonov']}\t{_fmt_val(row['Pendiente_mT_per_m_per_A'])}\t{_fmt_val(row['Error_Medio_pct'])}\t{_fmt_val(row['RMSE_per_range_mT_per_m_per_A'])}\t{row.get('Geometry_status', 'unchecked')}\n")
+            if best_slope is None or best_error is None:
+                fh.write('No interference-free winding was found. No design is recommended; all attempts were kept.\n')
+            else:
+                fh.write(f"Best absolute slope: Tikhonov={best_slope['Tikhonov']}\n")
+                fh.write(f"Lowest mean target-field error: Tikhonov={best_error['Tikhonov']}\n")
+        return
     with open(path, 'w', encoding='utf-8') as fh:
         fh.write(f"Resumen Barrido Tikhonov - EJE {cfg.axis_label}\n")
         fh.write(f"B0={cfg.b0_direction}; componente={cfg.field_component_label}; "
@@ -332,11 +363,8 @@ def run_tikhonov_sweep(
     cfg.sweep.fine, cfg.sweep.processes = fine, processes
 
     if output_base_dir is None:
-        output_base_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'resultados', 'barrido_tikhonov',
-        )
-    axis_dir = os.path.abspath(os.path.join(output_base_dir, f"Eje_{cfg.axis_label}"))
+        output_base_dir = output_base(cfg.output_language, name('sweep', cfg.output_language))
+    axis_dir = os.path.abspath(os.path.join(output_base_dir, f"{name('axis', cfg.output_language)}_{cfg.axis_label}"))
     os.makedirs(axis_dir, exist_ok=True)
     config_preset_path = save_config_preset(
         cfg, os.path.join(axis_dir, SWEEP_CONFIG_FILENAME),
@@ -344,15 +372,17 @@ def run_tikhonov_sweep(
     )
 
     print("\n" + "=" * 60)
-    print(f"  BARRIDO TIKHONOV - {cfg.axis_label} "
-          f"(radio externo {cfg.cylinder.radius} m)")
+    label = 'BARRIDO TIKHONOV' if cfg.output_language == 'es' else 'TIKHONOV SWEEP'
+    print(f"  {label} - {cfg.axis_label} (R={cfg.cylinder.radius} m)")
     print("=" * 60)
-    print(f"  Procesos simultáneos: {processes}")
+    label = 'Procesos simultáneos' if cfg.output_language == 'es' else 'Simultaneous processes'
+    print(f"  {label}: {processes}")
 
     # ----- Phase 1: coarse (log-spaced) -----------------------------------
     coarse_tks = np.logspace(np.log10(tk_min), np.log10(tk_max), n_coarse)
     coarse_tks = [round(float(tk), 4) for tk in coarse_tks]
-    rows = _run_phase(cfg, coarse_tks, axis_dir, 'Grueso', processes, on_progress)
+    rows = _run_phase(cfg, coarse_tks, axis_dir,
+                      'Grueso' if cfg.output_language == 'es' else 'Coarse', processes, on_progress)
 
     # ----- Phase 2: fine (linear around best coarse) ----------------------
     finite = [r for r in rows if np.isfinite(r['Pendiente_mT_per_m_per_A'])]
@@ -376,13 +406,13 @@ def run_tikhonov_sweep(
             tk_next = sorted_coarse[idx + 1] if idx < len(sorted_coarse) - 1 else best_tk * 2
             tk_prev, tk_next = max(tk_min, tk_prev), min(tk_max, tk_next)
 
-            print(f"\n  [*] Mejor grueso: {best_tk}; barrido fino en "
-                  f"[{tk_prev}, {tk_next}]")
+            label = 'Mejor grueso / rango fino' if cfg.output_language == 'es' else 'Best coarse / fine range'
+            print(f"\n  [*] {label}: {best_tk}; [{tk_prev}, {tk_next}]")
             fine_tks = [round(float(v), 4) for v in
                         np.linspace(tk_prev, tk_next, n_fine)]
             fine_tks = [tk for tk in fine_tks if tk not in coarse_tks]
             rows.extend(_run_phase(
-                cfg, fine_tks, axis_dir, 'Fino', processes, on_progress))
+                cfg, fine_tks, axis_dir, 'Fino' if cfg.output_language == 'es' else 'Fine', processes, on_progress))
 
     # ----- Consolidate ----------------------------------------------------
     rows.sort(key=lambda r: r['Tikhonov'])
@@ -394,19 +424,27 @@ def run_tikhonov_sweep(
     best_slope = (max(finite_rows, key=lambda r: abs(r['Pendiente_mT_per_m_per_A']))
                   if finite_rows else None)
 
-    csv_path = os.path.join(axis_dir, f"Resumen_Completo_Eje_{cfg.axis_label}.csv")
-    txt_path = os.path.join(axis_dir, f"Resumen_Completo_Eje_{cfg.axis_label}.txt")
-    _write_csv(csv_path, rows)
+    csv_path = os.path.join(axis_dir, f"{'Resumen_Completo_Eje' if cfg.output_language == 'es' else 'Sweep_summary_Axis'}_{cfg.axis_label}.csv")
+    txt_path = os.path.join(axis_dir, f"{'Resumen_Completo_Eje' if cfg.output_language == 'es' else 'Sweep_summary_Axis'}_{cfg.axis_label}.txt")
+    _write_csv(csv_path, rows, cfg.output_language)
     _write_txt(txt_path, cfg, rows, best_slope, best_error)
 
-    print(f"\n  Resumen guardado en: {axis_dir}")
-    if best_slope is not None and best_error is not None:
-        print(f"  Mejor pendiente sin interferencias: tk={best_slope['Tikhonov']} "
-              f"({_fmt_val(best_slope['Pendiente_mT_per_m_per_A'])} mT/(m.A))")
-        print(f"  Menor error sin interferencias: tk={best_error['Tikhonov']} "
-              f"({_fmt_val(best_error['Error_Medio_pct'])} %)")
+    if cfg.output_language == 'es':
+        print(f"\n  Resumen guardado en: {axis_dir}")
+        if best_slope is not None and best_error is not None:
+            print(f"  Mejor pendiente sin interferencias: tk={best_slope['Tikhonov']} "
+                  f"({_fmt_val(best_slope['Pendiente_mT_per_m_per_A'])} mT/(m.A))")
+            print(f"  Menor error sin interferencias: tk={best_error['Tikhonov']} "
+                  f"({_fmt_val(best_error['Error_Medio_pct'])} %)")
+        else:
+            print('  No se encontró un bobinado sin interferencias; no hay un diseño recomendado.')
     else:
-        print('  No se encontró un bobinado sin interferencias; no hay un diseño recomendado.')
+        print(f"\n  Summary saved to: {axis_dir}")
+        if best_slope is not None and best_error is not None:
+            print(f"  Best feasible slope: tk={best_slope['Tikhonov']}")
+            print(f"  Lowest feasible error: tk={best_error['Tikhonov']}")
+        else:
+            print('  No interference-free winding found; no design is recommended.')
 
     return SweepResult(
         axis=axis, rows=rows, csv_path=csv_path, txt_path=txt_path,

@@ -1,53 +1,47 @@
-# B0 y marco de coordenadas
+# B0 and the coordinate frame
 
-Los diseños nuevos usan un único marco físico XYZ para la malla, los STL,
-los puntos objetivo, los vectores de campo y el visor. El cilindro tiene su eje
-longitudinal en **+Z** por defecto. Cambiar B0 no mueve ese cilindro
-ni intercambia los radios X/Y/Z de la región objetivo.
+New designs use one physical XYZ frame for meshes, STL files, target samples,
+field vectors and viewers. The default cylinder axis is **+Z**. Changing B0 does
+not move the cylinder or exchange the ROI's X/Y/Z radii.
 
-B0 puede apuntar a +X, −X, +Y, −Y, +Z o −Z; por defecto apunta a +Y.
-Se optimiza la componente firmada `B_parallel = B · B0_hat`. Por tanto:
+B0 supports +X, −X, +Y, −Y, +Z and −Z; the default is +Y. Optimization uses the
+signed component `B_parallel = B · B0_hat`:
 
-- Gx es `d(B_parallel)/dx`.
-- Gy es `d(B_parallel)/dy`.
-- Gz es `d(B_parallel)/dz`.
+- Gx is `d(B_parallel)/dx`.
+- Gy is `d(B_parallel)/dy`.
+- Gz is `d(B_parallel)/dz`.
 
-Cambiar el signo de B0 invierte la componente física objetivo y el sentido
-de corriente correspondiente para conservar el signo positivo del gradiente
-solicitado. El vector se pasa también a la selección de cortes de CoilGen.
-La significancia de los contornos, selección de polaridades, errores de campo,
-derivadas y regresión usan la misma proyección. Los campos vectoriales completos
-se conservan en el resultado para inspección.
+Reversing B0 reverses the target's physical component and corresponding current
+direction to preserve the requested positive gradient. The vector also reaches
+CoilGen cut selection. Contour significance, polarity selection, field errors,
+derivatives and regression all use the same projection. Full vector fields are
+retained for inspection.
 
-Las métricas incluyen `b0_direction`, `b0_vector`, `coordinate_frame` y la
-componente firmada. El estado JSON de cada diseño guarda B0 y la configuración.
-En CLI se acepta, por ejemplo, `--axis x --b0=+y` o `--axis z --b0=-x`.
+Metrics record `b0_direction`, `b0_vector`, `coordinate_frame` and the signed
+component. Design-state JSON saves B0 and configuration. CLI examples include
+`--axis x --b0=+y` and `--axis z --b0=-x`.
 
-## Compatibilidad con diseños anteriores
+## Compatibility with older designs
 
-El flujo anterior llamaba Gx/Gy/Gz a objetivos internos y/z/x respectivamente,
-pero mantenía todos los campos en el marco de la geometría y optimizaba Bz.
-Rotar la malla por sí solo no convertía Bz en By. El flujo nuevo corrige esa
-inconsistencia como parte de la selección de B0; con B0=+Y los diseños pueden
-cambiar respecto de los antiguos. No se deben comparar resultados antiguos y
-nuevos únicamente por su nombre Gx/Gy/Gz.
+The previous workflow labeled internal y/z/x targets as Gx/Gy/Gz, while leaving
+fields in the geometry frame and optimizing Bz. Mesh rotation alone did not
+turn Bz into By. B0 selection corrects that inconsistency, so B0=+Y designs can
+differ from older designs with matching names. Do not compare them by Gx/Gy/Gz
+labels alone.
 
-Los archivos antiguos y sus nombres se conservan. La función de permutación
-histórica solo se mantiene para localizar STL antiguos. Para reutilizar un STL,
-se requieren su estado de diseño y sus archivos asociados, con parámetros y
-hashes compatibles. Los diseños antiguos sin ese estado deben regenerarse;
-cambiar las etiquetas del visor no convierte su geometría al marco nuevo.
-El motor de bajo nivel pyCoilGen conserva +Z como valor por defecto cuando
-se llama directamente sin proporcionar `b_0_direction`.
+Historical files and names remain available. The old permutation helper is
+retained only to locate older STLs. Reuse requires compatible design state,
+sidecars, parameters and hashes. Designs lacking provenance must be regenerated;
+changing viewer labels does not convert their geometry. The low-level engine
+still defaults to +Z when called directly without `b_0_direction`.
 
-## Verificación
+## Verification
 
-`tests/test_b0_physics.py` comprueba las 18 combinaciones de eje de gradiente y
-dirección de B0, la inversión de un operador de campo conocido en el optimizador,
-la derivada analítica frente a diferencias finitas de Biot–Savart, los contornos
-transversales, la selección de polaridad y la regresión en coordenadas físicas.
+`tests/test_b0_physics.py` checks all 18 gradient-axis/B0-axis combinations,
+sign reversal in a known optimization operator, analytical gradients against
+Biot–Savart finite differences, transverse contours, polarity selection and
+regression in physical coordinates.
 
-Después de generar los leads se calcula de nuevo Biot–Savart sobre la trayectoria
-real retenida y los dos terminales, conservando el sentido de corriente de
-CoilGen. Los resultados finales excluyen los cables externos de alimentación
-y retorno. Véase [la validación y sus límites](VALIDACION.md).
+After terminal creation, Biot–Savart is evaluated again on the retained winding
+and both leads, preserving CoilGen current direction. External supply and return
+wiring are excluded. See [validation and limitations](VALIDATION.md).

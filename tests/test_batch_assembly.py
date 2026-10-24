@@ -30,7 +30,7 @@ def _conductor(center, radius=.0003):
 
 @pytest.fixture
 def design(tmp_path):
-    base = Config()
+    base = Config(output_language='es')
     base.cylinder.height = .17
     base.target.rx = base.target.ry = base.target.rz = .015
     base.wire.conductor_width = .0015
@@ -52,6 +52,18 @@ def design(tmp_path):
 
 def _wire(result):
     return next((Path(result.output_dir) / 'Leads').glob('*.stl'))
+
+
+def test_english_assembly_can_read_historical_spanish_layer_folders(design):
+    batch, configs, results = design
+    for cfg in configs:
+        cfg.output_language = 'en'
+    batch.base.output_language = 'en'
+    result = assembly.finalize_batch(batch, configs, results)
+    assert Path(result['scene_path']).name == 'Gradients.glb'
+    assert Path(result['report_path']).name == 'keys.json'
+    assert Path(result['scene_path']).parent.name == 'Assembly'
+    assert all(Path(path).name.endswith('_mold.stl') for path in result['part_paths'].values())
 
 
 def _former(result):

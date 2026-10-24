@@ -107,7 +107,7 @@ class WorkerRunner:
             self.worker = context.Process(
                 target=execute_job,
                 args=(kind, cfg, extra, self._events, self._answers, gate, self.output_dir),
-                name=f'CoilGen-{kind}',
+                name=f'AutoGrad-{kind}',
             )
             self.worker.start()
             if os.name == 'nt':

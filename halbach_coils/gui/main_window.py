@@ -26,7 +26,7 @@ class CoilGenApp(tk.Tk):
         self.b0_var = tk.StringVar(value='+y')
         self._active_job_runner = None
         self._closing = False
-        self.title("pyCoilGen - MRI gradient coil design")
+        self.title("AutoGrad - MRI gradient coil design")
         self.geometry("1280x820")
         self.minsize(960, 640)
 
@@ -114,7 +114,7 @@ class CoilGenApp(tk.Tk):
         self._refresh_language()
 
     def _refresh_language(self):
-        self.title(self.tr("pyCoilGen - MRI gradient coil design"))
+        self.title(self.tr("AutoGrad - MRI gradient coil design"))
         self.menu_bar.entryconfigure(0, label=self.tr("Settings"))
         self.settings_menu.entryconfigure(0, label=self.tr("Language"))
         self.menu_bar.entryconfigure(2, label=self.tr("Results"))

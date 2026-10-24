@@ -418,7 +418,7 @@ def run_tikhonov_sweep(
 def main():
     """CLI entry: run a Tikhonov sweep for one axis."""
     import argparse
-    parser = argparse.ArgumentParser(description="Tikhonov regularization sweep.")
+    parser = argparse.ArgumentParser(description="AutoGrad: Tikhonov regularization sweep.")
     parser.add_argument('--axis', default='z', choices=('x', 'y', 'z'))
     parser.add_argument('--b0', default='+y', choices=('+x', '-x', '+y', '-y', '+z', '-z'),
                         help='Physical B0 direction; use --b0=-y for a negative direction')

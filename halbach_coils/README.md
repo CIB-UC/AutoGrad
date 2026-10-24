@@ -1,4 +1,4 @@
-# Halbach application
+# AutoGrad application
 
 This directory contains the supported Halbach-specific application built on the
 vendored `pyCoilGen` engine. Start with the repository-level [README](../README.md)
@@ -15,7 +15,7 @@ Run commands from the repository root with the project virtual environment:
 .\.venv\Scripts\python.exe halbach_coils\run_pipeline.py --help
 ```
 
-On Windows, `GradientDesign.bat` at the repository root is the recommended
+On Windows, `AutoGrad.bat` at the repository root is the recommended
 launcher because it creates and verifies `.venv` before opening the GUI.
 
 The GUI starts in English. **Settings > Language > Español** switches to Spanish

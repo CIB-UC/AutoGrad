@@ -29,7 +29,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Este bobinado no ha pasado la comprobación de separación del cable. Ejecute otro barrido o seleccione una fila válida.',
         'No winding without interference was found. Try fewer levels, more winding space or another parameter range. All attempts were kept in:\n{path}':
             'No se encontró un bobinado sin interferencias. Pruebe menos niveles, más espacio de bobinado u otro rango de parámetros. Todos los intentos se conservaron en:\n{path}',
-        "pyCoilGen - MRI gradient coil design": "pyCoilGen - Diseño de bobinas de gradiente MRI",
+        "AutoGrad - MRI gradient coil design": "AutoGrad - Diseño de bobinas de gradiente MRI",
         "Settings": "Configuración",
         "Final conductor — FastHenry R: {resistance} Ω | L: {inductance} µH": "Conductor final — FastHenry R: {resistance} Ω | L: {inductance} µH",
         "Final conductor — FastHenry: {status}. {reason}": "Conductor final — FastHenry: {status}. {reason}",

@@ -1,4 +1,4 @@
-# Documentación técnica
+# Documentación técnica de AutoGrad
 
 La instalación y los comandos vigentes están en el [README principal](../README.md).
 Los detalles de la interfaz, las marcas B₀ y las entradas STL están en el

@@ -30,6 +30,11 @@ La suite cubre motor, marcos B₀, parámetros, unidades, métricas, terminales,
 colisiones, exportación/recarga STL, lotes, marcas B₀, interfaz y cancelación.
 No equivale a una medición física ni a una validación de todos los parámetros.
 
+El cambio de nombre a **AutoGrad** es posterior a esa ejecución general. Se
+verificaron de nuevo las pruebas existentes de interfaz, los títulos en inglés
+y español, la ayuda de terminal y el inicio de `AutoGrad.bat` en modo de
+verificación. La lógica de diseño y cálculo no cambió con el nombre.
+
 ## Hallazgos de la revisión del 21 de octubre
 
 - La comprobación de cable utiliza distancias entre segmentos 3D no locales y

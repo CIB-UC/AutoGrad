@@ -129,7 +129,7 @@ def iter_layer_runs(configs, *, parallel, should_stop, ask_user,
                     target=_run_layer,
                     args=(index, cfg, events, answers[index], stop, gate,
                           question_language, ask_user is not None, electrical_lock),
-                    name=f'CoilGen-batch-G{cfg.gradient_axis}',
+                    name=f'AutoGrad-batch-G{cfg.gradient_axis}',
                 )
                 process.start()
                 workers[index] = process

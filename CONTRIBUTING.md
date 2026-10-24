@@ -1,4 +1,4 @@
-# Contributing to GradientDesign
+# Contributing to AutoGrad
 
 Start with the [README](README.md) for Windows setup and application commands,
 and the [technical index](docs/README.md) for coordinates, geometry and validation.

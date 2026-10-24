@@ -1,5 +1,5 @@
 r"""
-Launch the pyCoilGen Tkinter GUI.
+Launch the AutoGrad Tkinter GUI.
 
     .\.venv\Scripts\python.exe halbach_coils\run_gui.py
 """

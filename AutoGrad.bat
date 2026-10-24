@@ -4,13 +4,13 @@ setlocal EnableExtensions EnableDelayedExpansion
 rem Always work from the repository root, even when launched by double-click.
 cd /d "%~dp0"
 
-set "APP_NAME=GradientDesign"
+set "APP_NAME=AutoGrad"
 set "SETUP_VERSION=2026-08-20-2"
 set "SUPPORTED_PYTHONS=3.14 3.13 3.12 3.11"
 set "VENV_DIR=%CD%\.venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
 set "VENV_PYTHONW=%VENV_DIR%\Scripts\pythonw.exe"
-set "SETUP_STAMP=%VENV_DIR%\.gradientdesign-setup"
+set "SETUP_STAMP=%VENV_DIR%\.autograd-setup"
 set "REQUIREMENTS=%CD%\requirements-project.txt"
 set "GUI_SCRIPT=%CD%\halbach_coils\run_gui.py"
 
@@ -29,7 +29,7 @@ if not "!INSTALLED_SETUP_VERSION!"=="%SETUP_VERSION%" goto setup
 
 "%VENV_PYTHON%" -c "import tkinter, numpy, scipy, trimesh, sympy, PIL, matplotlib, manifold3d, networkx, rtree, skimage" >nul 2>&1
 if errorlevel 1 goto setup
-if /i "%GRADIENTDESIGN_SETUP_ONLY%"=="1" exit /b 0
+if /i "%AUTOGRAD_SETUP_ONLY%"=="1" exit /b 0
 if exist "%VENV_PYTHONW%" (
     start "" "%VENV_PYTHONW%" "%GUI_SCRIPT%"
 ) else (
@@ -114,7 +114,7 @@ if errorlevel 1 goto setup_failed
 echo.
 echo Setup completed successfully.
 echo.
-if /i "%GRADIENTDESIGN_SETUP_ONLY%"=="1" exit /b 0
+if /i "%AUTOGRAD_SETUP_ONLY%"=="1" exit /b 0
 if exist "%VENV_PYTHONW%" (
     start "" "%VENV_PYTHONW%" "%GUI_SCRIPT%"
 ) else (

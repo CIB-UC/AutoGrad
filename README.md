@@ -1,7 +1,7 @@
-# GradientDesign · Gradients-PyCoilGen
+# AutoGrad
 
 Design `Gx`, `Gy` and `Gz` gradient coils for a low-field MRI scanner based on a
-Halbach magnet. GradientDesign combines a graphical application, the included
+Halbach magnet. AutoGrad combines a graphical application, the included
 `pyCoilGen` engine, terminal routing, field evaluation and STL mould generation.
 It can also assemble three concentric gradients with alignment keys and B₀ marks.
 
@@ -16,11 +16,11 @@ inputs and regression tests. No separate clone or global installation of
 2. Clone this repository, or download its ZIP and extract the complete folder:
 
    ```powershell
-   git clone https://github.com/CIB-UC/Gradients-PyCoilGen.git
-   cd Gradients-PyCoilGen
+   git clone https://github.com/CIB-UC/Gradients-PyCoilGen.git AutoGrad
+   cd AutoGrad
    ```
 
-3. Double-click **`GradientDesign.bat`**. First launch creates `.venv`, installs
+3. Double-click **`AutoGrad.bat`**. First launch creates `.venv`, installs
    the dependencies declared in `pyproject.toml`, checks them and opens the GUI.
    Internet access is required for setup unless the packages are cached.
 4. Choose an **Output directory**, review the **Pipeline** parameters and select
@@ -81,7 +81,7 @@ pinned once in [pyproject.toml](pyproject.toml), including the `trimesh` extras
 change; the command's final result gives the current status.
 
 If the environment is broken, close the GUI and processes using `.venv`, rename
-that directory to `.venv.old`, then launch `GradientDesign.bat` to create a new
+that directory to `.venv.old`, then launch `AutoGrad.bat` to create a new
 one. Remove the backup when no longer needed.
 
 ### FastHenry2 (optional)
@@ -184,8 +184,8 @@ restore the study parameters with the chosen Tikhonov factor.
 ## Repository guide
 
 ```text
-Gradients-PyCoilGen/
-├── GradientDesign.bat       # Windows setup and GUI launcher
+AutoGrad/
+├── AutoGrad.bat       # Windows setup and GUI launcher
 ├── halbach_coils/           # Supported application
 │   ├── coilgen/            # Configuration, pipeline, geometry and metrics
 │   ├── gui/                # Tkinter GUI and English/Spanish translations

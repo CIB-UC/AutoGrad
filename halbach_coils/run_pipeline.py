@@ -269,7 +269,7 @@ def run_pipeline(cfg: Config, should_stop=None, ask_user=None,
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the full coil-mold pipeline.")
+    parser = argparse.ArgumentParser(description="AutoGrad: run the full coil-mold pipeline.")
     parser.add_argument('--axis', default='y', choices=('x', 'y', 'z'))
     parser.add_argument('--b0', default='+y', choices=('+x', '-x', '+y', '-y', '+z', '-z'),
                         help='Physical B0 direction; use --b0=-y for a negative direction')

@@ -1,7 +1,9 @@
-# Publicación inicial en CIB-UC
+# Publicación de AutoGrad en CIB-UC
 
 Destino: [CIB-UC/Gradients-PyCoilGen](https://github.com/CIB-UC/Gradients-PyCoilGen).
-La preparación local del 24 de octubre de 2026 no realiza ningún push.
+La versión anterior se publicó el 24 de octubre de 2026, en el commit `01c8408`.
+El cambio de nombre a AutoGrad se prepara como una actualización y requiere una
+nueva autorización antes de subirlo.
 
 ## Estado preparado
 
@@ -10,8 +12,8 @@ La preparación local del 24 de octubre de 2026 no realiza ningún push.
 - `release/github-ready` contiene una instantánea de la versión actual, incluidos
   los cambios de código que estaban pendientes y sus pruebas, junto con la
   documentación revisada.
-- Su padre es el commit inicial `7f71422` de `cib-uc/main`. Por ello conserva el
-  README inicial en la historia y permite un push normal.
+- La actualización parte de la versión publicada en `cib-uc/main`, conserva su
+  historial y permite un push normal.
 - El índice y la rama activa de trabajo se conservan. La rama lista
   para publicar se crea con un índice independiente; los cambios locales siguen
   disponibles para continuar el trabajo habitual.
@@ -19,8 +21,8 @@ La preparación local del 24 de octubre de 2026 no realiza ningún push.
 La instantánea incluye código, pruebas, fixtures, licencias y entradas STL.
 Excluye entornos, resultados, experimentos locales, ZIP duplicado, scripts
 obsoletos y notas de recuperación de una máquina. Esos archivos permanecen en
-el disco. El historial antiguo con resultados de simulación no es ancestro de
-esta rama y no se envía al publicar únicamente esta referencia.
+el disco. El historial local de desarrollo con resultados de simulación no es
+ancestro de esta rama y no se envía al publicar únicamente esta referencia.
 
 ## Revisar y subir
 
@@ -60,7 +62,7 @@ continúa desarrollando después de esta revisión.
 ## Comprobar la distribución
 
 La revisión del 24 de octubre de 2026 obtuvo **475 pruebas aprobadas** en una
-copia limpia del contenido preparado, usando el entorno existente. `pip check`
+copia limpia de la versión previa al cambio de nombre, usando el entorno existente. `pip check`
 no encontró incompatibilidades; la ayuda del pipeline y del barrido se ejecutó
 correctamente. Esto comprueba que las pruebas no dependan de archivos locales
 excluidos, sin sustituir una instalación nueva en otro equipo.

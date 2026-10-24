@@ -1,0 +1,278 @@
+"""
+Gradient coil design step — port of ``script_belen_santi.m``.
+
+Exposed as :func:`run_gradient` (a function, not a script that runs on import).
+Builds the spherical target-field file, runs pyCoilGen on the rotated cylinder
+mesh, exports the wire STL, computes metrics, and optionally checks for zones
+where three or more wire branches compete for the same two radial layers.
+"""
+
+from __future__ import annotations
+
+import logging
+import json
+import os
+from contextlib import contextmanager
+from typing import Optional, Tuple
+
+import numpy as np
+
+from . import geometry as geo
+from . import paths as _paths
+from .config import Config
+from .fasthenry import resolve_fasthenry_bin, fasthenry_available
+from .metrics import compute_metrics, print_metrics_summary
+from .overlap import detect_collisions, OverlapReport
+
+log = logging.getLogger(__name__)
+
+
+@contextmanager
+def _chdir(path: str):
+    """Temporarily change CWD (pyCoilGen resolves target_fields/ relative to it)."""
+    old = os.getcwd()
+    try:
+        os.chdir(path)
+        yield
+    finally:
+        os.chdir(old)
+
+
+def _setup_matplotlib(show_plots: bool):
+    import matplotlib
+    if not show_plots:
+        matplotlib.use('Agg', force=True)
+    matplotlib.rcParams['toolbar'] = 'None'
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+
+
+def run_gradient(
+    cfg: Config,
+    output_dir: Optional[str] = None,
+    project_stem: Optional[str] = None,
+    check_overlap: Optional[bool] = None,
+) -> Tuple[object, dict, Optional[OverlapReport]]:
+    """
+    Run pyCoilGen for ``cfg`` and return ``(solution, metrics, overlap_report)``.
+
+    ``output_dir`` defaults to ``cfg.output_dir`` (or a freshly allocated
+    pipeline run folder). ``project_stem`` defaults to a unique stem inside
+    the output dir. ``check_overlap`` controls diagnostic verbosity (default:
+    cfg.overlap_warn). A physical feasibility report is always returned.
+    """
+    from pyCoilGen.pyCoilGen_release import pyCoilGen
+    from .advanced import validate_advanced_config
+
+    validate_advanced_config(cfg)
+
+    _setup_matplotlib(cfg.show_plots)
+    if not logging.getLogger().hasHandlers():
+        logging.basicConfig(level=logging.INFO)
+
+    # ----- Resolve output directory ---------------------------------------
+    if output_dir is None:
+        output_dir = cfg.output_dir or _paths.unique_run_dir(
+            _paths.PIPELINE_OUTPUT_BASE, cfg.design_folder,
+        )
+    cfg.output_dir = output_dir
+    os.makedirs(output_dir, exist_ok=True)
+    target_dir = os.path.join(output_dir, 'target_fields')
+    os.makedirs(target_dir, exist_ok=True)
+
+    # ----- Target field ----------------------------------------------------
+    internal_axis = cfg.internal_axis
+    target_path, target_fname = geo.build_target_field_file(
+        internal_axis,
+        cfg.target.rx, cfg.target.ry, cfg.target.rz,
+        cfg.target.resol_radial, cfg.target.resol_angular,
+        target_dir,
+        b0_direction=cfg.b0_direction,
+    )
+    print(f"[target] built {os.path.basename(target_path)}  (field = {target_fname})")
+
+    # ----- FastHenry -------------------------------------------------------
+    fh_resolved = resolve_fasthenry_bin(cfg.fasthenry.bin_path)
+    fh_available = fasthenry_available(fh_resolved)
+    if cfg.fasthenry.enabled and not fh_available:
+        print("  WARNING: FastHenry2 was not found. R/L metrics will be marked as n/a.")
+
+    # ----- Project stem (unique within the run dir) -----------------------
+    if project_stem is None:
+        project_stem = _paths.unique_stem(
+            output_dir, cfg.project_stem_base, gradient_axis=cfg.gradient_axis,
+        )
+    _paths.write_active_stem(output_dir, project_stem)
+
+    # ----- arg dict --------------------------------------------------------
+    cyl = cfg.cylinder
+    # Shell length = cylinder.height (GUI). Wire mesh = height × 0.95 for
+    # every gradient axis (x/y/z) so grooves stay clear of the rim.
+    mesh_height = float(cyl.height) * float(cyl.mesh_length_factor)
+    cylinder_mesh_parameter_list = [
+        mesh_height, cfg.cylinder_design_radius,
+        cyl.n_circ, cyl.n_long,
+        *cyl.rot_axis,
+        cyl.rot_angle,
+    ]
+
+    arg_dict = {
+        'target_field_definition_file':       os.path.basename(target_path),
+        'target_field_definition_field_name': target_fname,
+        'coil_mesh_file':               'create cylinder mesh',
+        'cylinder_mesh_parameter_list': cylinder_mesh_parameter_list,
+        'surface_is_cylinder_flag':     True,
+        'min_loop_significance':        cfg.winding.min_loop_signif,
+        'levels':                       cfg.num_levels,
+        'pot_offset_factor':            cfg.winding.pot_offset_factor,
+        'interconnection_cut_width':    cfg.winding.cut_width,
+        'conductor_cross_section_width':  cfg.fasthenry_conductor_width,
+        'conductor_cross_section_height': cfg.fasthenry_conductor_height,
+        'conductor_cross_section_area':   cfg.electrical_cross_section_area,
+        'conductor_thickness':            cfg.wire.conductor_width,
+        'specific_conductivity_conductor': cfg.fasthenry.resistivity_ohm_m,
+        'cross_sectional_points':        cfg.cross_sectional_points.tolist(),
+        'normal_shift_length':           cfg.normal_shift_length,
+        'normal_shift_smooth_factors':   cfg.winding.normal_shift_smooth,
+        'skip_postprocessing':          False,
+        'auto_wire_clearance':          True,
+        'skip_inductance_calculation':  True,
+        'fasthenry_bin':                fh_resolved,
+        'smooth_factor':                cfg.winding.smooth_factor,
+        'make_cylindrical_pcb':         False,
+        'save_stl_flag':                True,
+        'CAD_filename':                 _paths.WIRE_CAD_FILENAME,
+        'tikhonov_reg_factor':          cfg.tikhonov_factor,
+        'output_directory':             output_dir,
+        'field_shape_function':         internal_axis,
+        'b_0_direction':                cfg.b0_vector.tolist(),
+        'project_name':                 project_stem,
+        'save_solution':                False,
+    }
+    arg_dict.update(cfg.advanced.to_coilgen_args())
+
+    print("\n" + "=" * 70)
+    print(f"  Running pyCoilGen — {cfg.axis_label}  |  Tikhonov={cfg.tikhonov_factor:g}"
+          f"  |  levels={cfg.num_levels}")
+    print(f"  Physical gradient     : d({cfg.field_component_label})/d{internal_axis}")
+    print(f"  B0 direction          : {cfg.b0_direction.upper()}")
+    print(f"  FastHenry enabled     : {cfg.fasthenry.enabled}")
+    print(f"  FastHenry binary      : {fh_resolved or 'not configured'}")
+    print(f"  FastHenry available   : {fh_available}")
+    print(f"  Cable height          : {cfg.cable_height*1000:.3f} mm")
+    print(f"  Real circular cable   : {cfg.wire.conductor_width*1000:.3f} mm diameter  "
+          f"({cfg.electrical_cross_section_area*1e6:.4f} mm^2)")
+    print(f"  Deformed groove area  : {cfg.groove_cross_section_area*1e6:.4f} mm^2  "
+          f"(x{cfg.groove_area_ratio:.3f}; geometry only)")
+    print(f"  Layer crossing gap    : {cfg.layer_crossing_gap*1000:.3f} mm")
+    print(f"  normal_shift_length   : {cfg.normal_shift_length*1000:.3f} mm")
+    print(f"  R_GUI (shell outer)   : {cfg.cylinder.radius*1000:.3f} mm")
+    print(f"  Cylinder height (GUI) : {cyl.height*1000:.3f} mm")
+    print(f"  pyCoilGen mesh height : {mesh_height*1000:.3f} mm  "
+          f"(×{cyl.mesh_length_factor:g})")
+    print(f"  Groove margin/face    : {cfg.radial_peel*1000:.3f} mm")
+    print(f"  Shell wall thickness  : {cfg.shell_wall_thickness*1000:.3f} mm")
+    print(f"  Shell inner bore      : {cfg.shell_inner_radius*1000:.3f} mm")
+    print(f"  pyCoilGen design_r    : {cfg.cylinder_design_radius*1000:.3f} mm  "
+          f"(base+offset)")
+    print(f"  Wire envelope         : {cfg.estimated_wire_inner_radius*1000:.3f}"
+          f" -- {cfg.estimated_wire_outer_radius*1000:.3f} mm")
+    print("=" * 70)
+
+    # pyCoilGen resolves target_fields/ relative to CWD.
+    with _chdir(output_dir):
+        solution = pyCoilGen(log, arg_dict)
+
+    metrics = compute_metrics(
+        solution, cfg.gradient_axis, output_dir, project_stem,
+        cfg.to_params_dict(),
+        fasthenry_enabled=False,
+        fasthenry_available=fh_available,
+    )
+    print_metrics_summary(metrics)
+    from .field_plots import save_field_plots
+    metrics['field_plots'] = save_field_plots(
+        solution, output_dir, cfg.gradient_axis, cfg.b0_direction, project_stem)
+    wire_path = _paths.resolve_wire_stl_path(
+        output_dir, cfg.gradient_axis, cfg.tikhonov_factor, cfg.num_levels)
+    from .leads import save_lead_reference
+    from .design_state import save_design_state
+    reference_path = save_lead_reference(solution, cfg, wire_path)
+    sidecars = [metrics['field_plots']['data_path']]
+    if reference_path:
+        sidecars.append(reference_path)
+    save_design_state(wire_path, cfg, sidecar_paths=sidecars)
+
+    # Physical feasibility is mandatory; the old flag controls verbosity only.
+    overlap_report = detect_collisions(solution, cfg)
+    geometry = {
+        'status': 'valid' if overlap_report.n_collisions == 0 else 'needs_revision',
+        'stage': 'coil_only', 'required_separation_mm': cfg.wire.conductor_width*1000,
+        'collision_sites': overlap_report.n_collisions,
+        'minimum_found_mm': min((site.minimum_distance_m*1000
+                                for site in overlap_report.sites
+                                if site.minimum_distance_m is not None), default=None),
+        'parts': [getattr(part, 'clearance_report', {'status': 'not_attempted'})
+                  for part in solution.coil_parts],
+    }
+    if geometry['minimum_found_mm'] is None:
+        geometry['minimum_found_mm'] = min((part['minimum_mm'] for part in geometry['parts']
+                                           if part.get('minimum_mm') is not None), default=None)
+    geometry_path = os.path.join(output_dir, project_stem + '_geometry.json')
+    with open(geometry_path, 'w', encoding='utf-8') as handle:
+        json.dump(geometry, handle, indent=2, allow_nan=False)
+        handle.write('\n')
+    metrics['geometry_report'] = geometry
+    metrics['geometry_report_path'] = geometry_path
+    if (check_overlap if check_overlap is not None else cfg.overlap_warn):
+        if overlap_report.n_collisions > 0:
+            print(f"\n  Wire clearance: {overlap_report.n_collisions} area(s) below the "
+                  f"required {cfg.wire.conductor_width*1000:.4g} mm centerline separation.")
+        else:
+            print("\n  Round-wire interference check OK: no nonlocal branches overlap.")
+
+    # ----- Wire radial extent vs analytical shell -------------------------
+    try:
+        from .shell import warn_wire_radial_mismatch
+        wire_path = _paths.resolve_wire_stl_path(
+            output_dir, cfg.gradient_axis,
+            cfg.tikhonov_factor, cfg.num_levels,
+        )
+        warn_wire_radial_mismatch(cfg, wire_path)
+    except (FileNotFoundError, RuntimeError):
+        pass
+
+    print(f"  Results directory      : {output_dir}\n")
+    return solution, metrics, overlap_report
+
+
+def main():
+    """CLI entry: run a single gradient design from a default Config."""
+    import argparse
+    parser = argparse.ArgumentParser(description="Run a single gradient coil design.")
+    parser.add_argument('--axis', default='y', choices=('x', 'y', 'z'))
+    parser.add_argument('--b0', default='+y', choices=('+x', '-x', '+y', '-y', '+z', '-z'),
+                        help='Physical B0 direction; use --b0=-y for a negative direction')
+    parser.add_argument('--tikhonov', type=float, default=2500)
+    parser.add_argument('--levels', type=int, default=26)
+    parser.add_argument('--radius', type=float, default=0.150)
+    parser.add_argument('--height', type=float, default=0.430)
+    parser.add_argument('--output-dir', default='')
+    parser.add_argument('--no-plots', action='store_true')
+    args = parser.parse_args()
+
+    cfg = Config(
+        gradient_axis=args.axis,
+        b0_direction=args.b0,
+        tikhonov_factor=args.tikhonov,
+        num_levels=args.levels,
+        show_plots=not args.no_plots,
+    )
+    cfg.cylinder.radius = args.radius
+    cfg.cylinder.height = args.height
+    if args.output_dir:
+        cfg.output_dir = args.output_dir
+    run_gradient(cfg)
+
+
+if __name__ == '__main__':
+    main()

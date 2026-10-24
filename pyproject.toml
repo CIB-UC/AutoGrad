@@ -1,0 +1,93 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "pycoilgen"
+authors = [
+        {name = "Kevin Meyer", email = "kevin@kmz.co.za"},
+        {name = "Philipp Amrein", email="none@noreply.com"},
+]
+readme = "README.md"
+license = {file = "LICENSE.txt"}
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Healthcare Industry",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering",
+]
+
+requires-python = ">=3.11,!=3.14.1,<3.15"
+keywords = [
+    "MRI",
+    "Magnetic Resonance Imaging",
+    "NMR",
+    "Nuclear Resonance Imaging",
+    "Target Field",
+    "Gradient Field",
+    "Physics",
+    "Coil",
+]
+dependencies = [
+    "numpy==2.4.2",
+    "scipy==1.17.0",
+    "trimesh==4.10.1",
+    "sympy==1.14.0",
+    "pillow==12.3.0",
+    "matplotlib==3.11.1",
+    # These trimesh extras are required by the application at runtime:
+    # split() uses networkx; spatial queries use rtree; voxel remeshing uses
+    # scikit-image's marching-cubes implementation.
+    "networkx==3.6.1",
+    "rtree==1.4.1",
+    "scikit-image==0.26.0",
+    "manifold3d==3.5.2",
+]
+dynamic = ["version", "description"]
+
+[project.optional-dependencies]
+test = [
+    "pytest==9.1.1",
+]
+
+[project.urls]
+Home = "https://github.com/CIB-UC/Gradients-PyCoilGen"
+Documentation = "https://github.com/CIB-UC/Gradients-PyCoilGen/blob/main/README.md"
+Source = "https://github.com/CIB-UC/Gradients-PyCoilGen"
+"Bug tracker" = "https://github.com/CIB-UC/Gradients-PyCoilGen/issues"
+Contributing = "https://github.com/CIB-UC/Gradients-PyCoilGen/blob/main/CONTRIBUTING.md"
+"Upstream engine" = "https://github.com/kev-m/pyCoilGen"
+"Upstream documentation" = "https://pycoilgen.readthedocs.io/"
+
+[project.scripts]
+pyCoilGen = "pyCoilGen:__main__.main"
+
+[tool.flit.module]
+name = "pyCoilGen"
+
+[tool.flit.sdist]
+include = [
+]
+exclude = [
+    "docs",
+    "examples",
+    "utilities",
+    "scratchpad",
+    "tests",
+    "data",
+    "pyCoilGen/pyCoilGen_develop.py",
+]
+
+[tool.autopep8]
+max_line_length = 120
+aggressive = 0

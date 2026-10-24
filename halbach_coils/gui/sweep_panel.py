@@ -1,0 +1,339 @@
+"""
+Tikhonov sweep panel.
+
+Select dimensions and Tikhonov sweep limits, toggle fine adjustment, and run
+the headless sweep. Results are shown in a table and saved as CSV/TXT in the
+output directory. Suggested widened range for Gz is pre-filled.
+"""
+
+from __future__ import annotations
+
+import copy
+import csv
+import math
+import os
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+from typing import Optional
+
+from coilgen.config import CONDUCTOR_MATERIAL_RESISTIVITY, Config
+from coilgen import sweep as sweep_mod
+from coilgen.presets import load_config_preset
+from .runner import WorkerRunner, JobCancelled
+from .units import mm_to_m
+from .advanced_controls import AdvancedControls
+
+
+_GEOMETRY_LABELS = {'valid': 'Wire clear', 'interference': 'Turns too close',
+                    'failed': 'Calculation failed', 'unchecked': 'Unverified'}
+
+
+class SweepPanel(ttk.Frame):
+    def __init__(self, master, get_output_dir, set_output_dir, root):
+        super().__init__(master)
+        self.get_output_dir = get_output_dir
+        self.set_output_dir = set_output_dir
+        self.root = root
+        self.runner: Optional[WorkerRunner] = None
+        self._rows_by_item: dict[str, dict] = {}
+        self._last_sweep_cfg: Optional[Config] = None
+        self._build()
+
+    def _build(self):
+        form = ttk.LabelFrame(self, text="Tikhonov sweep", padding=10)
+        form.pack(fill='x', padx=8, pady=6)
+
+        ttk.Label(form, text="Axis:").grid(row=0, column=0, sticky='w', padx=4, pady=4)
+        self.axis_var = tk.StringVar(value='z')
+        axis_combo = ttk.Combobox(form, textvariable=self.axis_var,
+                                  values=['x', 'y', 'z'], state='readonly', width=6)
+        axis_combo.grid(row=0, column=1, sticky='w')
+        axis_combo.bind('<<ComboboxSelected>>', lambda _e: self._fill_defaults())
+
+        ttk.Label(form, text="Outer radius [mm]:").grid(row=1, column=0, sticky='w', padx=4, pady=4)
+        self.radius_var = tk.StringVar(value='39')
+        ttk.Entry(form, textvariable=self.radius_var, width=10).grid(row=1, column=1, sticky='w')
+        ttk.Label(form, text="Height [mm]:").grid(row=1, column=2, sticky='w', padx=4)
+        self.height_var = tk.StringVar(value='170')
+        ttk.Entry(form, textvariable=self.height_var, width=10).grid(row=1, column=3, sticky='w')
+        ttk.Label(form, text="ROI radius [mm]:").grid(
+            row=2, column=0, sticky='w', padx=4, pady=4)
+        self.roi_var = tk.StringVar(value='20')
+        ttk.Entry(form, textvariable=self.roi_var, width=10).grid(
+            row=2, column=1, sticky='w')
+        ttk.Label(form, text="Levels:").grid(row=2, column=2, sticky='w', padx=4)
+        self.levels_var = tk.StringVar(value='12')
+        ttk.Entry(form, textvariable=self.levels_var, width=8).grid(row=2, column=3, sticky='w')
+
+        ttk.Label(form, text="Conductor material:").grid(
+            row=3, column=0, sticky='w', padx=4, pady=4)
+        self.material_var = tk.StringVar(value='Cu')
+        material_combo = ttk.Combobox(
+            form, textvariable=self.material_var,
+            values=[*CONDUCTOR_MATERIAL_RESISTIVITY, 'Custom'],
+            state='readonly', width=8,
+        )
+        material_combo.grid(row=3, column=1, sticky='w')
+        material_combo.bind(
+            '<<ComboboxSelected>>', lambda _event: self._on_material_changed())
+        ttk.Label(form, text="Resistivity [ohm.m]:").grid(
+            row=3, column=2, sticky='w', padx=4)
+        self.resistivity_var = tk.StringVar(
+            value=f"{CONDUCTOR_MATERIAL_RESISTIVITY['Cu']:.3g}")
+        ttk.Entry(form, textvariable=self.resistivity_var, width=10).grid(
+            row=3, column=3, sticky='w')
+
+        ttk.Label(form, text="Tikhonov min:").grid(row=4, column=0, sticky='w', padx=4, pady=4)
+        self.tk_min_var = tk.StringVar(value='1')
+        ttk.Entry(form, textvariable=self.tk_min_var, width=10).grid(row=4, column=1, sticky='w')
+        ttk.Label(form, text="Tikhonov max:").grid(row=4, column=2, sticky='w', padx=4)
+        self.tk_max_var = tk.StringVar(value='1000000')
+        ttk.Entry(form, textvariable=self.tk_max_var, width=12).grid(row=4, column=3, sticky='w')
+        ttk.Label(form, text="Coarse points:").grid(row=5, column=0, sticky='w', padx=4, pady=4)
+        self.n_coarse_var = tk.StringVar(value='12')
+        ttk.Entry(form, textvariable=self.n_coarse_var, width=8).grid(row=5, column=1, sticky='w')
+        self.fine_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(form, text="Fine adjustment", variable=self.fine_var).grid(row=5, column=2, columnspan=2, sticky='w')
+
+        ttk.Label(form, text="Simultaneous processes:").grid(
+            row=6, column=0, sticky='w', padx=4, pady=4)
+        self.processes_var = tk.StringVar(value='1')
+        self.processes_spin = ttk.Spinbox(
+            form, textvariable=self.processes_var, from_=1,
+            to=sweep_mod.MAX_SWEEP_PROCESSES, width=8)
+        self.processes_spin.grid(row=6, column=1, sticky='w')
+        ttk.Label(form, text="1 = sequential").grid(
+            row=6, column=2, columnspan=2, sticky='w', padx=4)
+
+        self._fill_defaults()
+
+        self.coilgen_advanced = AdvancedControls(self, root=self.root)
+        self.coilgen_advanced.pack(fill='x', padx=8, pady=4)
+
+        bar = ttk.Frame(self)
+        bar.pack(fill='x', padx=8, pady=4)
+        self.run_btn = ttk.Button(bar, text="Run sweep", command=self._on_run)
+        self.run_btn.pack(side='left')
+        self.stop_btn = ttk.Button(bar, text="Stop", command=self._on_stop)
+        ttk.Button(bar, text="Load previous CSV...",
+                   command=self._load_previous_sweep).pack(side='left', padx=(8, 0))
+        ttk.Button(bar, text="Use selected in Pipeline",
+                   command=self._use_selected).pack(side='left', padx=(8, 0))
+        self.progress = ttk.Progressbar(bar, mode='determinate', maximum=100, length=300)
+        self.progress.pack(side='left', padx=10)
+
+        # Results table
+        res = ttk.LabelFrame(self, text="Results", padding=4)
+        res.pack(fill='both', expand=True, padx=8, pady=4)
+        cols = ('phase', 'tikhonov', 'slope', 'mean_error', 'rmse', 'geometry')
+        self.tree = ttk.Treeview(res, columns=cols, show='headings', height=10)
+        self._column_labels = {
+            'phase': 'Phase', 'tikhonov': 'Tikhonov', 'slope': 'Slope',
+            'mean_error': 'Mean error', 'rmse': 'RMSE', 'geometry': 'Winding geometry',
+        }
+        for c, w in zip(cols, (60, 90, 110, 90, 110, 135)):
+            self.tree.heading(c, text=self.root.tr(self._column_labels[c]))
+            self.tree.column(c, width=w, anchor='e')
+        self.tree.pack(side='left', fill='both', expand=True)
+        sb = ttk.Scrollbar(res, command=self.tree.yview)
+        sb.pack(side='right', fill='y')
+        self.tree.configure(yscrollcommand=sb.set)
+        self.tree.tag_configure('invalid', foreground='#a32323')
+
+        log_frame = ttk.LabelFrame(self, text="Log", padding=4)
+        log_frame.pack(fill='both', expand=True, padx=8, pady=4)
+        self.log_text = tk.Text(log_frame, height=8, wrap='word')
+        self.log_text.pack(side='left', fill='both', expand=True)
+        lsb = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        lsb.pack(side='right', fill='y')
+        self.log_text.configure(yscrollcommand=lsb.set)
+
+        self.runner = WorkerRunner(self.log_text, self.progress, self.root)
+
+    def _fill_defaults(self):
+        axis = self.axis_var.get()
+        d_min, d_max, d_n = sweep_mod.DEFAULT_RANGES.get(axis, (1.0, 100000.0, 10))
+        self.tk_min_var.set(str(int(d_min)))
+        self.tk_max_var.set(str(int(d_max)))
+        self.n_coarse_var.set(str(d_n))
+
+    def _on_material_changed(self):
+        resistivity = CONDUCTOR_MATERIAL_RESISTIVITY.get(self.material_var.get())
+        if resistivity is not None:
+            self.resistivity_var.set(f'{resistivity:.3g}')
+
+    @staticmethod
+    def _parse_csv_row(row: dict) -> dict:
+        parsed = dict(row)
+        for key in (
+            'Tikhonov', 'Pendiente_mT_per_m_per_A', 'Error_Medio_pct',
+            'RMSE_per_range_mT_per_m_per_A', 'Wire_length_m',
+        ):
+            parsed[key] = float(parsed[key])
+        parsed.setdefault('Geometry_status', 'unchecked')
+        return parsed
+
+    def _insert_result_row(self, row: dict) -> None:
+        status = row.get('Geometry_status', 'unchecked')
+        label = _GEOMETRY_LABELS.get(status, 'Unverified')
+        item = self.tree.insert(
+            '', 'end',
+            values=(row['Fase'], row['Tikhonov'],
+                    f"{row['Pendiente_mT_per_m_per_A']:.4g}",
+                    f"{row['Error_Medio_pct']:.4g}",
+                    f"{row['RMSE_per_range_mT_per_m_per_A']:.4g}", self.root.tr(label)),
+            tags=() if sweep_mod.row_is_feasible(row) else ('invalid',),
+        )
+        self._rows_by_item[item] = row
+
+    def _clear_results(self) -> None:
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        self._rows_by_item.clear()
+
+    def _load_previous_sweep(self):
+        path = filedialog.askopenfilename(
+            title=self.root.tr("Load previous sweep"),
+            filetypes=[("CSV", "*.csv"), (self.root.tr("All files"), "*.*")],
+            parent=self.root,
+        )
+        if not path:
+            return
+        config_path = os.path.join(
+            os.path.dirname(path), sweep_mod.SWEEP_CONFIG_FILENAME)
+        try:
+            cfg = load_config_preset(config_path)
+            with open(path, newline='', encoding='utf-8') as fh:
+                rows = [self._parse_csv_row(row) for row in csv.DictReader(fh)]
+            if not rows:
+                raise ValueError('The sweep CSV contains no results.')
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            messagebox.showerror(
+                self.root.tr("Invalid sweep"), str(exc), parent=self.root)
+            return
+        self._clear_results()
+        self._last_sweep_cfg = cfg
+        for row in rows:
+            self._insert_result_row(row)
+
+    def _use_selected(self):
+        selected = self.tree.selection()
+        if not selected or self._last_sweep_cfg is None:
+            messagebox.showwarning(
+                self.root.tr("No sweep result selected"),
+                self.root.tr("Select one result row first."), parent=self.root)
+            return
+        row = self._rows_by_item[selected[0]]
+        if not sweep_mod.row_is_feasible(row):
+            messagebox.showwarning(
+                self.root.tr('Winding geometry'),
+                self.root.tr('This winding has not passed the wire clearance check. Run a new sweep or select a valid row.'),
+                parent=self.root)
+            return
+        cfg = copy.deepcopy(self._last_sweep_cfg)
+        cfg.tikhonov_factor = float(row['Tikhonov'])
+        self.root.pipeline_panel.apply_config(cfg)
+        self.root.notebook.select(self.root.pipeline_panel)
+
+    def _on_run(self):
+        out_dir = self.get_output_dir()
+        if not out_dir:
+            messagebox.showwarning(self.root.tr("Missing directory"),
+                                   self.root.tr("Select an output directory first."))
+            return
+        try:
+            cfg = Config(gradient_axis=self.axis_var.get(),
+                         b0_direction=self.root.b0_var.get(),
+                         num_levels=int(self.levels_var.get()),
+                         show_plots=False, overlap_warn=False)
+            cfg.cylinder.radius = mm_to_m(self.radius_var.get())
+            cfg.cylinder.height = mm_to_m(self.height_var.get())
+            roi_radius = mm_to_m(self.roi_var.get())
+            cfg.target.rx = cfg.target.ry = cfg.target.rz = roi_radius
+            resistivity = float(self.resistivity_var.get())
+            if not math.isfinite(resistivity) or resistivity <= 0:
+                raise ValueError(self.root.tr(
+                    "Resistivity must be a positive number."))
+            cfg.fasthenry.material = self.material_var.get()
+            cfg.fasthenry.specific_conductivity = resistivity
+            cfg.sweep.fine = self.fine_var.get()
+            self.coilgen_advanced.apply_to(cfg)
+            tk_min = float(self.tk_min_var.get())
+            tk_max = float(self.tk_max_var.get())
+            n_coarse = int(self.n_coarse_var.get())
+            processes = int(self.processes_var.get())
+            if not 1 <= processes <= sweep_mod.MAX_SWEEP_PROCESSES:
+                raise ValueError(self.root.tr(
+                    "Processes must be an integer between 1 and {maximum}.",
+                    maximum=sweep_mod.MAX_SWEEP_PROCESSES))
+            cfg.sweep.tk_min = tk_min
+            cfg.sweep.tk_max = tk_max
+            cfg.sweep.n_coarse = n_coarse
+            cfg.sweep.processes = processes
+            sweep_mod.validate_sweep_parameters(tk_min, tk_max, n_coarse)
+        except (ValueError, KeyError) as exc:
+            messagebox.showerror(self.root.tr("Invalid parameters"), str(exc))
+            return
+        fine = cfg.sweep.fine
+        self._last_sweep_cfg = copy.deepcopy(cfg)
+
+        # Clear table
+        self._clear_results()
+
+        def _on_progress(phase, tk, event, row=None):
+            if event == 'done' and row is not None:
+                self._insert_result_row(row)
+
+        def _on_done(result, err):
+            if isinstance(err, JobCancelled):
+                self.runner.log(self.root.tr("Stopped. Partial output files were kept.") + '\n')
+                return
+            if err is not None:
+                messagebox.showerror(
+                    self.root.tr("Sweep"), self.root.tr("Failed: {error}", error=err))
+            elif result is not None:
+                bs = result.best_slope
+                be = result.best_error
+                if bs is None or be is None:
+                    messagebox.showwarning(
+                        self.root.tr('Sweep complete'),
+                        self.root.tr('No winding without interference was found. Try fewer levels, more winding space or another parameter range. All attempts were kept in:\n{path}',
+                                     path=result.csv_path), parent=self.root)
+                    return
+                messagebox.showinfo(
+                    self.root.tr("Sweep complete"),
+                    self.root.tr(
+                        "Best slope: tk={tk} ({value:.4g} mT/(m.A))\nLowest error: tk={error_tk} ({error:.4g} %)\nCSV: {path}",
+                        tk=bs['Tikhonov'],
+                        value=bs['Pendiente_mT_per_m_per_A'],
+                        error_tk=be['Tikhonov'],
+                        error=be['Error_Medio_pct'],
+                        path=result.csv_path))
+
+        self.runner.run_job('sweep', cfg,
+                            extra={'tk_min': tk_min, 'tk_max': tk_max,
+                                   'n_coarse': n_coarse, 'fine': fine,
+                                   'output_base_dir': out_dir},
+                            on_done=_on_done, on_progress=_on_progress)
+
+    def _set_running(self, running):
+        self.run_btn.configure(state='disabled' if running else 'normal')
+        self.processes_spin.configure(state='disabled' if running else 'normal')
+        if running:
+            self.stop_btn.configure(state='normal', text=self.root.tr("Stop"))
+            if not self.stop_btn.winfo_ismapped():
+                self.stop_btn.pack(side='left', padx=6, before=self.progress)
+        else:
+            self.stop_btn.pack_forget()
+
+    def _on_stop(self):
+        self.runner.request_stop()
+        self.stop_btn.configure(state='disabled', text=self.root.tr("Stopping..."))
+
+    def retranslate(self):
+        self.coilgen_advanced.retranslate()
+        for column, source in self._column_labels.items():
+            self.tree.heading(column, text=self.root.tr(source))
+        for item, row in self._rows_by_item.items():
+            self.tree.set(item, 'geometry', self.root.tr(
+                _GEOMETRY_LABELS.get(row.get('Geometry_status'), 'Unverified')))

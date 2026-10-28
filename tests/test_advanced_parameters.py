@@ -21,6 +21,7 @@ from halbach_coils.gui.advanced_controls import AdvancedControls  # noqa: E402
 
 def test_advanced_defaults_match_current_engine_and_existing_geometry():
     cfg = Config()
+    assert (cfg.cylinder.n_circ, cfg.cylinder.n_long) == (40, 40)
     _, engine = parse_input(False)
     args = AdvancedConfig().to_coilgen_args()
     for key, value in args.items():

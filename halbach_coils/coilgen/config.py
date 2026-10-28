@@ -114,8 +114,8 @@ class TargetConfig:
 class CylinderConfig:
     height: float = 0.430                      # [m] requested shell / cylinder length
     radius: float = 0.039                      # [m] physical outer radius
-    n_circ: int = 200
-    n_long: int = 10
+    n_circ: int = 40
+    n_long: int = 40
     rot_axis: tuple = (0, 1, 0)
     rot_angle: float = 0.0
     # pyCoilGen mesh axial length = height * this (< 1 keeps windings short of

@@ -99,7 +99,7 @@ def test_advanced_reset_is_limited_to_advanced_parameters():
     controls.variables['advanced.gauss_order'].set('7')
     controls.reset_button.invoke()
     controls.apply_to(cfg)
-    assert cfg.cylinder.n_circ == 200
+    assert (cfg.cylinder.n_circ, cfg.cylinder.n_long) == (40, 40)
     assert cfg.winding.cut_width == .001
     assert cfg.advanced.gauss_order == 2
     assert cfg.cylinder.radius == .15 and cfg.target.rx == .07

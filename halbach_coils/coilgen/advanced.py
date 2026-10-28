@@ -114,10 +114,10 @@ class ParameterSpec:
 # Labels include display units. cut_width is the sole value shown in mm;
 # all Config lengths remain in metres.
 PARAMETERS = (
-    ParameterSpec('cylinder.n_circ', 'mesh', 'Circumferential divisions', 'Divisiones circunferenciales', 200, 'int',
+    ParameterSpec('cylinder.n_circ', 'mesh', 'Circumferential divisions', 'Divisiones circunferenciales', 40, 'int',
                   'Cylinder samples around the bore (8–720). More samples resolve winding shape better but increase memory and solve time.',
                   'Muestras alrededor del cilindro (8–720). Más muestras detallan mejor el trazado y aumentan memoria y tiempo.', 8, 720),
-    ParameterSpec('cylinder.n_long', 'mesh', 'Longitudinal divisions', 'Divisiones longitudinales', 10, 'int',
+    ParameterSpec('cylinder.n_long', 'mesh', 'Longitudinal divisions', 'Divisiones longitudinales', 40, 'int',
                   'Cylinder divisions along the bore (2–100). A finer axial mesh adds design freedom and increases solve cost.',
                   'Divisiones a lo largo del cilindro (2–100). Una malla axial fina agrega libertad de diseño y aumenta el costo del cálculo.', 2, 100),
     ParameterSpec('cylinder.mesh_length_factor', 'mesh', 'Winding length / shell length', 'Largo del bobinado / largo del molde', 0.95, 'float',

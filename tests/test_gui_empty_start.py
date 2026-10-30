@@ -1,4 +1,4 @@
-"""Empty principal inputs are a neutral initial state, not invalid geometry."""
+"""Editable defaults and cleared fields keep the interface usable."""
 
 from pathlib import Path
 import sys
@@ -18,20 +18,17 @@ def app():
     root.destroy()
 
 
-def test_empty_start_is_neutral_and_advanced_defaults_remain(app):
+def test_default_designs_are_valid_and_cleared_fields_are_neutral(app):
     pipeline, batch, sweep = app.pipeline_panel, app.batch_panel, app.sweep_panel
-    assert all(not getattr(pipeline, name).get() for name in (
-        'radius_var', 'height_var', 'roi_var', 'tikhonov_var', 'levels_var',
-        'cw_var', 'a_var', 'b_var', 'n_var', 'material_var', 'resistivity_var',
-        'margin_var', 'layer_gap_var'))
-    assert all(not getattr(sweep, name).get() for name in (
-        'radius_var', 'height_var', 'roi_var', 'levels_var', 'material_var',
-        'resistivity_var', 'tk_min_var', 'tk_max_var', 'n_coarse_var', 'processes_var'))
-    assert all(not variable.get() for variable in batch.roi_vars.values())
-    assert all(not variable.get() for group in (batch.cable_vars, batch.levels_vars,
-                                                  batch.layer_gap_vars, batch.tikhonov_vars)
-               for variable in group.values())
+    assert pipeline.radius_var.get() == '50' and pipeline.height_var.get() == '200'
+    assert pipeline._build_cfg().target.rx == .02
+    assert batch._build_cfg().anchor_radius == .05
+    assert sweep.radius_var.get() == '50' and sweep.height_var.get() == '200'
+    assert sweep.tk_min_var.get() == '1000' and sweep.tk_max_var.get() == '100000'
     assert pipeline.coilgen_advanced.variables['cylinder.n_circ'].get() == '40'
+    pipeline.radius_var.set('')
+    batch.anchor_radius_var.set('')
+    batch._redraw_preview()
     assert str(batch.preview_notice.cget('foreground')) == '#666666'
     assert 'Enter the design values' in batch.preview_notice.cget('text')
     assert any('Enter the design values' in item.get_text() for item in pipeline.cyl_ax.texts)

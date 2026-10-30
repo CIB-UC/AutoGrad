@@ -3,7 +3,7 @@ Tikhonov sweep panel.
 
 Select dimensions and Tikhonov sweep limits, toggle fine adjustment, and run
 the headless sweep. Results are shown in a table and saved as CSV/TXT in the
-output directory. Main design and sweep fields start empty.
+output directory. Main values start with editable example settings.
 """
 
 from __future__ import annotations
@@ -50,23 +50,23 @@ class SweepPanel(ttk.Frame):
         axis_combo.grid(row=0, column=1, sticky='w')
 
         ttk.Label(form, text="Outer radius [mm]:").grid(row=1, column=0, sticky='w', padx=4, pady=4)
-        self.radius_var = tk.StringVar(value='')
+        self.radius_var = tk.StringVar(value='50')
         ttk.Entry(form, textvariable=self.radius_var, width=10).grid(row=1, column=1, sticky='w')
         ttk.Label(form, text="Height [mm]:").grid(row=1, column=2, sticky='w', padx=4)
-        self.height_var = tk.StringVar(value='')
+        self.height_var = tk.StringVar(value='200')
         ttk.Entry(form, textvariable=self.height_var, width=10).grid(row=1, column=3, sticky='w')
         ttk.Label(form, text="ROI radius [mm]:").grid(
             row=2, column=0, sticky='w', padx=4, pady=4)
-        self.roi_var = tk.StringVar(value='')
+        self.roi_var = tk.StringVar(value='20')
         ttk.Entry(form, textvariable=self.roi_var, width=10).grid(
             row=2, column=1, sticky='w')
         ttk.Label(form, text="Levels:").grid(row=2, column=2, sticky='w', padx=4)
-        self.levels_var = tk.StringVar(value='')
+        self.levels_var = tk.StringVar(value='10')
         ttk.Entry(form, textvariable=self.levels_var, width=8).grid(row=2, column=3, sticky='w')
 
         ttk.Label(form, text="Conductor material:").grid(
             row=3, column=0, sticky='w', padx=4, pady=4)
-        self.material_var = tk.StringVar(value='')
+        self.material_var = tk.StringVar(value='Cu')
         material_combo = ttk.Combobox(
             form, textvariable=self.material_var,
             values=[*CONDUCTOR_MATERIAL_RESISTIVITY, 'Custom'],
@@ -77,25 +77,25 @@ class SweepPanel(ttk.Frame):
             '<<ComboboxSelected>>', lambda _event: self._on_material_changed())
         ttk.Label(form, text="Resistivity [ohm.m]:").grid(
             row=3, column=2, sticky='w', padx=4)
-        self.resistivity_var = tk.StringVar(value='')
+        self.resistivity_var = tk.StringVar(value='1.68e-8')
         ttk.Entry(form, textvariable=self.resistivity_var, width=10).grid(
             row=3, column=3, sticky='w')
 
         ttk.Label(form, text="Tikhonov min:").grid(row=4, column=0, sticky='w', padx=4, pady=4)
-        self.tk_min_var = tk.StringVar(value='')
+        self.tk_min_var = tk.StringVar(value='1000')
         ttk.Entry(form, textvariable=self.tk_min_var, width=10).grid(row=4, column=1, sticky='w')
         ttk.Label(form, text="Tikhonov max:").grid(row=4, column=2, sticky='w', padx=4)
-        self.tk_max_var = tk.StringVar(value='')
+        self.tk_max_var = tk.StringVar(value='100000')
         ttk.Entry(form, textvariable=self.tk_max_var, width=12).grid(row=4, column=3, sticky='w')
         ttk.Label(form, text="Coarse points:").grid(row=5, column=0, sticky='w', padx=4, pady=4)
-        self.n_coarse_var = tk.StringVar(value='')
+        self.n_coarse_var = tk.StringVar(value='10')
         ttk.Entry(form, textvariable=self.n_coarse_var, width=8).grid(row=5, column=1, sticky='w')
         self.fine_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(form, text="Fine adjustment", variable=self.fine_var).grid(row=5, column=2, columnspan=2, sticky='w')
 
         ttk.Label(form, text="Simultaneous processes:").grid(
             row=6, column=0, sticky='w', padx=4, pady=4)
-        self.processes_var = tk.StringVar(value='')
+        self.processes_var = tk.StringVar(value='1')
         self.processes_spin = ttk.Spinbox(
             form, textvariable=self.processes_var, from_=1,
             to=sweep_mod.MAX_SWEEP_PROCESSES, width=8)

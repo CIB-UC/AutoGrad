@@ -60,7 +60,7 @@ class BatchPanel(ttk.Frame):
         shared = ttk.LabelFrame(left, text='Shared dimensions', padding=8)
         shared.pack(fill='x', pady=(0, 4))
         shared.columnconfigure(1, weight=1)
-        self.height_var = self._entry(shared, 0, 'Height [mm]:', '170')
+        self.height_var = self._entry(shared, 0, 'Height [mm]:', '200')
         radius_modes = ttk.Frame(shared)
         radius_modes.grid(row=1, column=0, columnspan=2, sticky='w', pady=4)
         self.radius_mode_var = tk.StringVar(self, value='inner')
@@ -69,7 +69,7 @@ class BatchPanel(ttk.Frame):
                         value='inner').pack(side='left')
         ttk.Radiobutton(radius_modes, text='Outer gradient radius', variable=self.radius_mode_var,
                         value='outer').pack(side='left', padx=8)
-        self.anchor_radius_var = self._entry(shared, 2, 'Reference radius [mm]:', '26.5')
+        self.anchor_radius_var = self._entry(shared, 2, 'Reference radius [mm]:', '50')
         self.radial_gap_var = self._entry(shared, 3, 'Gap between gradients [mm]:', '0.3')
         self.roi_vars = {}
         for row, axis in enumerate('xyz', 4):
@@ -77,7 +77,7 @@ class BatchPanel(ttk.Frame):
         self.a_var = self._entry(shared, 7, 'Groove deformation A:', '2')
         self.b_var = self._entry(shared, 8, 'Groove deformation B:', '1')
         ttk.Label(shared, text='Conductor material:').grid(row=9, column=0, sticky='w', pady=3)
-        self.material_var = tk.StringVar(self, value='')
+        self.material_var = tk.StringVar(self, value='Cu')
         material = ttk.Combobox(shared, textvariable=self.material_var,
                                 values=[*CONDUCTOR_MATERIAL_RESISTIVITY, 'Custom'],
                                 state='readonly', width=13)
@@ -115,10 +115,10 @@ class BatchPanel(ttk.Frame):
                                     variable=self.enabled_vars[axis])
             label.grid(row=row, column=0, padx=3, pady=3)
             self._layer_rows[axis] = [label]
-            self.cable_vars[axis] = tk.StringVar(self, value='')
-            self.layer_gap_vars[axis] = tk.StringVar(self, value='')
-            self.tikhonov_vars[axis] = tk.StringVar(self, value='')
-            self.levels_vars[axis] = tk.StringVar(self, value='')
+            self.cable_vars[axis] = tk.StringVar(self, value='2')
+            self.layer_gap_vars[axis] = tk.StringVar(self, value='0')
+            self.tikhonov_vars[axis] = tk.StringVar(self, value='2500')
+            self.levels_vars[axis] = tk.StringVar(self, value='10')
             for col, var in enumerate((self.cable_vars[axis], self.layer_gap_vars[axis], self.tikhonov_vars[axis],
                                        self.levels_vars[axis]), 1):
                 entry = ttk.Entry(layers, textvariable=var, width=8)
@@ -225,7 +225,7 @@ class BatchPanel(ttk.Frame):
 
     def _entry(self, parent, row, label, value):
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky='w', pady=3)
-        variable = tk.StringVar(self, value='')
+        variable = tk.StringVar(self, value=value)
         entry = ttk.Entry(parent, textvariable=variable, width=14)
         entry.grid(row=row, column=1, sticky='e', padx=3)
         self._entries[str(variable)] = entry

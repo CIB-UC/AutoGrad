@@ -10,6 +10,7 @@ and shell inputs.
 | [OUTPUT_LAYOUT.md](OUTPUT_LAYOUT.md) | GUI-dependent output names, saved language and historical compatibility. |
 | [VALIDATION.md](VALIDATION.md) | Automated verification, engineering findings and limitations. |
 | [CROSSING_VALIDATION.md](CROSSING_VALIDATION.md) | Crossing-ramp correction and the original Gx/Gy batch reproduction. |
+| [REGRESSION_2026-10-29.md](REGRESSION_2026-10-29.md) | Mesh-change regression: successful clearance repairs rejected during UV projection. |
 | [GEOMETRY_RECOVERY.md](GEOMETRY_RECOVERY.md) | Turn spacing, route recovery, clearance-aware sweeps and partial results. |
 | [BATCH_AND_ASSEMBLY.md](BATCH_AND_ASSEMBLY.md) | Complete/plastic radii, gaps, keys and historical CAD checks. |
 | [OUTPUTS_AND_FASTHENRY.md](OUTPUTS_AND_FASTHENRY.md) | Output organization and pre-lead versus final electrical metrics. |

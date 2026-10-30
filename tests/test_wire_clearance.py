@@ -154,3 +154,6 @@ def test_uv_projection_failure_preserves_the_actual_conductor(monkeypatch):
     np.testing.assert_array_equal(part.wire_path.v.T, path)
     assert part.clearance_report['status'] == 'unresolved'
     assert part.clearance_report['remaining_contact_pairs'] == 38
+    assert part.clearance_report['minimum_mm'] == pytest.approx(
+        part.clearance_report['initial_minimum_mm'])
+    assert part.clearance_report['rejected_candidate_minimum_mm'] >= 2.02

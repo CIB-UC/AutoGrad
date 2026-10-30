@@ -218,7 +218,9 @@ def _redistribute_axially(original, diameter, z_bounds, limit, max_iterations, d
 
 
 def _updated_uv(mesh, path_local, rotation, selected, diameter):
-    """Project changed stations onto actual cylinder triangles for sweep normals."""
+    """Map stations radially onto the faceted cylinder, preserving their height."""
+    if not len(selected):
+        return np.empty((0, 2))
     local_vertices = mesh.get_vertices() @ rotation.T
     radius = np.median(np.linalg.norm(local_vertices[:, :2], axis=1))
     projected = path_local[selected].copy()
@@ -228,15 +230,35 @@ def _updated_uv(mesh, path_local, rotation, selected, diameter):
     candidates = cKDTree(triangles.mean(axis=1)).query(
         projected, k=min(32, len(triangles)))[1]
     candidates = np.asarray(candidates).reshape(len(projected), -1)
-    repeated = np.repeat(projected, candidates.shape[1], axis=0)
-    closest = trimesh.triangles.closest_point(triangles[candidates.ravel()], repeated)
-    distances = np.linalg.norm(closest-repeated, axis=1).reshape(candidates.shape)
-    best = distances.argmin(axis=1)
-    if np.any(distances[np.arange(len(best)), best] > diameter*.05):
+    # The ideal circle lies outside the flat facets. With 40 divisions at
+    # R=50 mm this gap reaches 0.154 mm, exceeding the old 0.1 mm tolerance
+    # for a 2 mm cable. It is mesh discretization, not a failed wire repair.
+    # Intersect each radial ray with actual triangles instead of testing the
+    # ideal circle's distance to them. This changes UV only, never the wire.
+    origins = np.zeros((len(selected), 3))
+    origins[:, 2] = path_local[selected, 2]
+    origins = origins @ rotation
+    directions = (projected-origins)/radius
+    nearby = triangles[candidates]
+    normals = np.cross(nearby[:, :, 1]-nearby[:, :, 0],
+                       nearby[:, :, 2]-nearby[:, :, 0])
+    denominator = np.einsum('ijk,ik->ij', normals, directions)
+    numerator = np.einsum('ijk,ijk->ij', normals, nearby[:, :, 0]-origins[:, None])
+    radial = np.divide(numerator, denominator, out=np.zeros_like(numerator),
+                       where=np.abs(denominator) > 1e-12*np.linalg.norm(normals, axis=2))
+    hits = origins[:, None]+radial[:, :, None]*directions[:, None]
+    barycentric = trimesh.triangles.points_to_barycentric(
+        nearby.reshape(-1, 3, 3), hits.reshape(-1, 3)).reshape(*candidates.shape, 3)
+    valid = ((radial > 0) & (radial <= radius+diameter*.05)
+             & np.all(np.isfinite(barycentric), axis=2)
+             & np.all(barycentric >= -1e-9, axis=2)
+             & np.all(barycentric <= 1+1e-9, axis=2))
+    if not np.all(valid.any(axis=1)):
         raise ValueError('Cannot project repaired turns onto the cylinder mesh.')
+    best = np.where(valid, np.abs(radial-radius), np.inf).argmin(axis=1)
     faces = candidates[np.arange(len(best)), best]
-    closest = closest.reshape(*candidates.shape, 3)[np.arange(len(best)), best]
-    barycentric = trimesh.triangles.points_to_barycentric(triangles[faces], closest)
+    barycentric = np.clip(barycentric[np.arange(len(best)), best], 0., 1.)
+    barycentric /= barycentric.sum(axis=1, keepdims=True)
     return np.einsum('ij,ijk->ik', barycentric, mesh.uv[mesh.get_faces()[faces]])
 
 
@@ -372,7 +394,9 @@ def ensure_wire_clearance(part, input_args):
                              float(input_args.conductor_thickness))
         except ValueError as exc:
             report.update(status='unresolved', reason=str(exc), max_displacement_mm=0.,
-                          remaining_contact_pairs=report['initial_contact_pairs'])
+                          remaining_contact_pairs=report['initial_contact_pairs'],
+                          rejected_candidate_minimum_mm=report.get('minimum_mm'),
+                          minimum_mm=report.get('initial_minimum_mm'))
         else:
             part.wire_path.v = (repaired @ rotation).T
             part.wire_path.uv[:, selected] = uv.T

@@ -61,6 +61,24 @@ def test_original_gx_parameters_clear_the_real_two_mm_wire():
     np.testing.assert_allclose(np.abs(np.diff(part.crossing_layer_factors, axis=1)), 1)
 
 
+def test_disabling_reassignment_keeps_the_original_crossing_selection(monkeypatch):
+    filename = Path(__file__).parent / 'test_data' / 'gx_crossing_ramps.npz'
+    with np.load(filename, allow_pickle=False) as saved:
+        mesh = Mesh(vertices=saved['vertices'], faces=saved['faces'])
+        mesh.uv = saved['mesh_uv']
+        path = Shape3D(v=saved['wire_v'], uv=saved['wire_uv'])
+        legacy = saved['legacy_path']
+    part = SimpleNamespace(coil_mesh=mesh, wire_path=path)
+    args = SimpleNamespace(skip_normal_shift=False, normal_shift_smooth_factors=[7, 7, 7],
+                           normal_shift_length=-.004, smooth_factor=3,
+                           conductor_thickness=.002, reassign_crossing_layers=False)
+    def forbidden(*_args):
+        raise AssertionError('Disabled reassignment must not run')
+    monkeypatch.setattr(module, 'crossing_shift_points', forbidden)
+    module.shift_return_paths([part], args)
+    np.testing.assert_allclose(part.wire_path.v.T, legacy, atol=1e-12)
+
+
 def test_already_separated_route_keeps_its_original_layer_selection(monkeypatch):
     # A single isolated crossing is already resolved by the original logic.
     mesh = Mesh(vertices=np.array([[-1., -1., 0.], [1., -1., 0.],

@@ -134,6 +134,7 @@ class WindingConfig:
     layer_gap_mm: float = 0.0                   # [m] radial gap at layer crossing
     normal_shift_height_factor: float = 1.40    # legacy; ignored when layer_gap_mm set
     normal_shift_smooth: list = field(default_factory=lambda: [7, 7, 7])
+    reassign_crossing_layers: bool = True
     smooth_factor: int = 3
 
 

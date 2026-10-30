@@ -145,7 +145,9 @@ def dispatch_job(kind, cfg, extra, *, ask_user, on_progress):
         raise ValueError(f'Unknown standalone action: {action}')
     if kind == 'sweep':
         from halbach_coils.coilgen.sweep import run_tikhonov_sweep
-        return run_tikhonov_sweep(cfg, on_progress=on_progress, **extra)
+        sweep_options = {key: value for key, value in extra.items()
+                         if key != 'question_language'}
+        return run_tikhonov_sweep(cfg, on_progress=on_progress, **sweep_options)
     if kind == '_callable':
         kwargs = dict(extra.get('kwargs') or {})
         if extra.get('ask_user_enabled'):

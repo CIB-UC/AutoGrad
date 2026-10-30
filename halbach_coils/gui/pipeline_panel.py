@@ -273,6 +273,10 @@ class PipelinePanel(ttk.Frame):
         ttk.Checkbutton(form, text="Add B₀ orientation marks to the shell",
                         variable=self.b0_marker_var).grid(
             row=12, column=0, columnspan=4, sticky='w', padx=4, pady=4)
+        self.reassign_crossings_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(form, text='Reassign nearby crossings between radial layers',
+                        variable=self.reassign_crossings_var).grid(
+            row=13, column=0, columnspan=4, sticky='w', padx=4, pady=4)
         self._toggle_shell()
 
         # Steps toggles
@@ -389,6 +393,7 @@ class PipelinePanel(ttk.Frame):
     def apply_config(self, cfg: Config) -> None:
         """Populate Pipeline controls from a selected sweep configuration."""
         self.axis_var.set(cfg.gradient_axis)
+        self.reassign_crossings_var.set(cfg.winding.reassign_crossing_layers)
         self.root.b0_var.set(cfg.b0_direction)
         self.coilgen_advanced.load_config(cfg)
         self.tikhonov_var.set(f'{cfg.tikhonov_factor:g}')
@@ -1127,6 +1132,7 @@ class PipelinePanel(ttk.Frame):
             show_plots=False,
             overlap_warn=self.overlap_var.get(),
         )
+        cfg.winding.reassign_crossing_layers = self.reassign_crossings_var.get()
         if self.roi_ellipsoidal_var.get():
             cfg.target.rx = mm_to_m(self.roi_rx_var.get())
             cfg.target.ry = mm_to_m(self.roi_ry_var.get())

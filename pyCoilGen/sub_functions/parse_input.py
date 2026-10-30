@@ -222,6 +222,8 @@ def parse_input(parse_cli=True):
     # Add smoothing parameters regarding the normal shift
     parser.add_argument('--normal_shift_smooth_factors', nargs='+', type=int,
                         default=[2, 3, 2], help="Smoothing parameters regarding the normal shift")
+    parser.add_argument('--reassign_crossing_layers', type=bool, default=True,
+                        help='Allow joint reassignment of interacting crossings to radial layers')
 
     # Flag to skip the generation of a volumetric (3D) coil body
     parser.add_argument('--auto_wire_clearance', type=bool, default=False,

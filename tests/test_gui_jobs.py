@@ -79,6 +79,21 @@ def test_gui_language_is_captured_before_serializing_a_job(monkeypatch, language
     assert target.output_language == extra['question_language'] == language
 
 
+def test_sweep_dispatch_accepts_gui_language_metadata(tmp_path, monkeypatch):
+    from halbach_coils.coilgen.config import Config
+    from halbach_coils.coilgen import sweep
+    from halbach_coils.gui.jobs import dispatch_job
+
+    cfg = Config(show_plots=False, output_language='es')
+    monkeypatch.setattr(sweep, '_run_phase', lambda *args: [])
+    extra = {'question_language': 'es', 'output_base_dir': str(tmp_path),
+             'tk_min': 1, 'tk_max': 10, 'n_coarse': 2, 'fine': False}
+    result = dispatch_job('sweep', cfg, extra, ask_user=None, on_progress=None)
+    assert Path(result.config_preset_path).is_file()
+    assert Path(result.csv_path).parent.name == 'Eje_GX'
+    assert extra['question_language'] == 'es'
+
+
 def _spin(root, condition, timeout=12):
     deadline = time.monotonic() + timeout
     while not condition() and time.monotonic() < deadline:

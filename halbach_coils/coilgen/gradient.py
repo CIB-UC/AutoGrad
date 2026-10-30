@@ -133,6 +133,7 @@ def run_gradient(
         'cross_sectional_points':        cfg.cross_sectional_points.tolist(),
         'normal_shift_length':           cfg.normal_shift_length,
         'normal_shift_smooth_factors':   cfg.winding.normal_shift_smooth,
+        'reassign_crossing_layers':      cfg.winding.reassign_crossing_layers,
         'skip_postprocessing':          False,
         'auto_wire_clearance':          True,
         'skip_inductance_calculation':  True,

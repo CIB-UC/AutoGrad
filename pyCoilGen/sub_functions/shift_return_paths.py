@@ -175,7 +175,8 @@ def shift_return_paths(coil_parts: List[CoilPart], input_args):
                 # and smoothing kernel. Leave already separated routes alone.
                 diameter = float(getattr(input_args, 'conductor_thickness', 0.0))
                 separation = np.abs(np.diff(coil_part.crossing_layer_factors, axis=1))
-                if (diameter > 0 and abs(normal_shift_length) >= diameter
+                if (getattr(input_args, 'reassign_crossing_layers', True)
+                        and diameter > 0 and abs(normal_shift_length) >= diameter
                         and np.any(separation * abs(normal_shift_length) < diameter)):
                     repaired_points = crossing_shift_points(
                         cross_segments, points_to_shift, len(arr3))

@@ -88,6 +88,10 @@ class BatchPanel(ttk.Frame):
         ttk.Checkbutton(shared, text='Add aligned B₀ marks to selected gradients',
                         variable=self.b0_markers_var).grid(
             row=11, column=0, columnspan=2, sticky='w', pady=4)
+        self.reassign_crossings_var = tk.BooleanVar(self, value=True)
+        ttk.Checkbutton(shared, text='Reassign nearby crossings between radial layers',
+                        variable=self.reassign_crossings_var).grid(
+            row=12, column=0, columnspan=2, sticky='w', pady=4)
 
         layers = ttk.LabelFrame(left, text='Layers: inner to outer', padding=8)
         layers.pack(fill='x', pady=4)
@@ -243,6 +247,7 @@ class BatchPanel(ttk.Frame):
 
     def _base_config(self):
         cfg = Config(gradient_axis='x', b0_direction=self.root.b0_var.get(), show_plots=False)
+        cfg.winding.reassign_crossing_layers = self.reassign_crossings_var.get()
         cfg.cylinder.height = float(self.height_var.get()) / 1000
         cfg.target.rx, cfg.target.ry, cfg.target.rz = (
             float(self.roi_vars[axis].get()) / 1000 for axis in 'xyz')

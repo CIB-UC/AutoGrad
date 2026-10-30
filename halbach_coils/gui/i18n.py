@@ -43,6 +43,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Batch design": "Diseño en lote",
         "Design selected gradients": "Diseñar gradientes seleccionados",
         "Add aligned B₀ marks to selected gradients": "Añadir marcas B₀ alineadas a los gradientes seleccionados",
+        "Reassign nearby crossings between radial layers": "Reasignar cruces cercanos entre capas radiales",
         "Select the gradients to generate. Radii and keys are recalculated for the selected set.":
             "Selecciona los gradientes que se generarán. Los radios y encajes se recalculan para el conjunto seleccionado.",
         "{axis}: excluded from batch": "{axis}: excluido del lote",

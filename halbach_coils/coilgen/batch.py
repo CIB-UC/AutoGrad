@@ -203,6 +203,7 @@ def _layer_record(cfg: Config, index: int) -> dict:
         'layer_crossing_gap_m': cfg.winding.layer_gap_mm,
         'interconnection_cut_width_m': cfg.winding.cut_width,
         'normal_shift_smooth_factors': list(cfg.winding.normal_shift_smooth),
+        'reassign_crossing_layers': cfg.winding.reassign_crossing_layers,
         'shell_wall_thickness_m': cfg.shell_wall_thickness,
         'gradient_inner_radius_m': gradient_radial_bounds(cfg)[0],
         'gradient_outer_radius_m': gradient_radial_bounds(cfg)[1],

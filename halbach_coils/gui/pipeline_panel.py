@@ -85,14 +85,16 @@ class PipelinePanel(ttk.Frame):
         # ---- Left: scrollable controls (only when content overflows) ----
         controls_shell = ttk.Frame(self.hpaned)
         self.hpaned.add(controls_shell, weight=2)
+        controls_shell.rowconfigure(0, weight=1)
+        controls_shell.columnconfigure(0, weight=1)
 
         ctrl_canvas = tk.Canvas(controls_shell, highlightthickness=0,
                                 borderwidth=0)
         ctrl_scroll = ttk.Scrollbar(controls_shell, orient='vertical',
                                     command=ctrl_canvas.yview)
         ctrl_canvas.configure(yscrollcommand=ctrl_scroll.set)
-        ctrl_canvas.pack(side='left', fill='both', expand=True)
-        ctrl_scroll.pack(side='right', fill='y')
+        ctrl_canvas.grid(row=0, column=0, sticky='nsew')
+        ctrl_scroll.grid(row=0, column=1, sticky='ns')
 
         left = ttk.Frame(ctrl_canvas)
         left_window = ctrl_canvas.create_window((0, 0), window=left, anchor='nw')
@@ -107,9 +109,9 @@ class PipelinePanel(ttk.Frame):
             view_h = ctrl_canvas.winfo_height()
             if content_h <= view_h + 2:
                 if ctrl_scroll.winfo_ismapped():
-                    ctrl_scroll.pack_forget()
+                    ctrl_scroll.grid_remove()
             elif not ctrl_scroll.winfo_ismapped():
-                ctrl_scroll.pack(side='right', fill='y')
+                ctrl_scroll.grid()
 
         left.bind('<Configure>', _sync_scroll)
         ctrl_canvas.bind('<Configure>', lambda e: (
@@ -286,20 +288,23 @@ class PipelinePanel(ttk.Frame):
         self.run_leads_var = tk.BooleanVar(value=True)
         self.run_shell_var = tk.BooleanVar(value=True)
         self.overlap_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(steps, text="Gradient (pyCoilGen)",
-                        variable=self.run_gradient_var).pack(side='left', padx=6)
-        ttk.Checkbutton(steps, text="Leads",
-                        variable=self.run_leads_var).pack(side='left', padx=6)
-        ttk.Checkbutton(steps, text="Shell",
-                        variable=self.run_shell_var).pack(side='left', padx=6)
+        self._step_choices_frame = ttk.Frame(steps)
+        self._step_choices_frame.pack(fill='x')
+        self._step_choices = [
+            ttk.Checkbutton(self._step_choices_frame, text="Gradient (pyCoilGen)", variable=self.run_gradient_var),
+            ttk.Checkbutton(self._step_choices_frame, text="Leads", variable=self.run_leads_var),
+            ttk.Checkbutton(self._step_choices_frame, text="Shell", variable=self.run_shell_var),
+        ]
+        self._step_layout_columns = None
+        self._step_choices_frame.bind('<Configure>', self._layout_step_choices)
 
         self.coilgen_advanced = AdvancedControls(
             left, root=self.root, on_change=self._redraw_previews)
         self.coilgen_advanced.pack(fill='x', pady=4, padx=(0, 2))
 
         # Run bar
-        bar = ttk.Frame(left)
-        bar.pack(fill='x', pady=(4, 2), padx=(0, 2))
+        bar = ttk.Frame(controls_shell)
+        bar.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(4, 2), padx=(0, 2))
         self.run_btn = ttk.Button(bar, text="Run pipeline", command=self._on_run)
         self.run_btn.pack(side='left')
         self.stop_btn = ttk.Button(bar, text="Stop", command=self._on_stop)
@@ -363,6 +368,24 @@ class PipelinePanel(ttk.Frame):
 
         # Sensible initial sash positions once the window has a real size.
         self.after(80, self._init_sashes)
+
+    def _layout_step_choices(self, _event=None):
+        width = self._step_choices_frame.winfo_width()
+        if width <= 1:
+            return
+        columns = 3 if sum(widget.winfo_reqwidth() + 12 for widget in self._step_choices) <= width else 2
+        if columns == self._step_layout_columns:
+            return
+        self._step_layout_columns = columns
+        for widget in self._step_choices:
+            widget.grid_remove()
+        for index, widget in enumerate(self._step_choices):
+            if columns == 3:
+                widget.grid(row=0, column=index, columnspan=1, sticky='w', padx=6)
+            elif index == 0:
+                widget.grid(row=0, column=0, columnspan=2, sticky='w', padx=6)
+            else:
+                widget.grid(row=1, column=index - 1, columnspan=1, sticky='w', padx=6)
 
     def _init_sashes(self):
         """Place paned-window sashes once the layout has a real size."""
@@ -1257,6 +1280,7 @@ class PipelinePanel(ttk.Frame):
 
     def retranslate(self):
         """Refresh dynamic preview text after a language change."""
+        self._layout_step_choices()
         self.coilgen_advanced.retranslate()
         self._update_measured_dims_label()
         if hasattr(self, 'geo3d_ax'):

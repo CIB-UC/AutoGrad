@@ -9,7 +9,7 @@ from halbach_coils.run_pipeline import PipelineResult
 
 
 @pytest.fixture
-def app():
+def app(fill_gui_design):
     import tkinter as tk
     from halbach_coils.gui.main_window import CoilGenApp
     try:
@@ -19,6 +19,7 @@ def app():
             pytest.skip(str(exc))
         raise
     root.withdraw(); root.update()
+    fill_gui_design(root)
     yield root
     root.destroy()
 

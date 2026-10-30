@@ -158,12 +158,12 @@ class PipelinePanel(ttk.Frame):
         # In custom-STL mode these entries are hidden; measured labels are shown.
         self.radius_label = ttk.Label(form, text="Cylinder outer radius [mm]:")
         self.radius_label.grid(row=1, column=0, sticky='w', padx=4, pady=4)
-        self.radius_var = tk.StringVar(value='39')
+        self.radius_var = tk.StringVar(value='')
         self.radius_entry = ttk.Entry(form, textvariable=self.radius_var, width=10)
         self.radius_entry.grid(row=1, column=1, sticky='w')
         self.height_label = ttk.Label(form, text="Cylinder height [mm]:")
         self.height_label.grid(row=1, column=2, sticky='w', padx=4)
-        self.height_var = tk.StringVar(value='170')
+        self.height_var = tk.StringVar(value='')
         self.height_entry = ttk.Entry(form, textvariable=self.height_var, width=10)
         self.height_entry.grid(row=1, column=3, sticky='w')
         self.dims_readonly_var = tk.StringVar(value='')
@@ -179,15 +179,15 @@ class PipelinePanel(ttk.Frame):
         self.roi_sphere_frame = ttk.Frame(form)
         self.roi_sphere_frame.grid(row=3, column=0, columnspan=4, sticky='we', padx=4)
         ttk.Label(self.roi_sphere_frame, text="ROI radius [mm]:").pack(side='left')
-        self.roi_var = tk.StringVar(value='20')
+        self.roi_var = tk.StringVar(value='')
         ttk.Entry(self.roi_sphere_frame, textvariable=self.roi_var, width=10).pack(
             side='left', padx=(4, 0))
 
         self.roi_ellip_frame = ttk.Frame(form)
         self.roi_ellip_frame.grid(row=3, column=0, columnspan=4, sticky='we', padx=4)
-        self.roi_rx_var = tk.StringVar(value='20')
-        self.roi_ry_var = tk.StringVar(value='20')
-        self.roi_rz_var = tk.StringVar(value='20')
+        self.roi_rx_var = tk.StringVar(value='')
+        self.roi_ry_var = tk.StringVar(value='')
+        self.roi_rz_var = tk.StringVar(value='')
         ttk.Label(self.roi_ellip_frame, text="Rx [mm]:").pack(side='left')
         ttk.Entry(self.roi_ellip_frame, textvariable=self.roi_rx_var, width=8).pack(
             side='left', padx=(2, 8))
@@ -201,29 +201,29 @@ class PipelinePanel(ttk.Frame):
 
         # Optimization
         ttk.Label(form, text="Tikhonov:").grid(row=4, column=0, sticky='w', padx=4, pady=4)
-        self.tikhonov_var = tk.StringVar(value='2500')
+        self.tikhonov_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.tikhonov_var, width=10).grid(row=4, column=1, sticky='w')
         ttk.Label(form, text="Levels (turns):").grid(row=4, column=2, sticky='w', padx=4)
-        self.levels_var = tk.StringVar(value='12')
+        self.levels_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.levels_var, width=10).grid(row=4, column=3, sticky='w')
 
         # Wire characteristics
         ttk.Label(form, text="Real cable diameter [mm]:").grid(row=5, column=0, sticky='w', padx=4, pady=4)
-        self.cw_var = tk.StringVar(value='2')
+        self.cw_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.cw_var, width=10).grid(row=5, column=1, sticky='w')
         ttk.Label(form, text="Groove height [mm]:").grid(row=5, column=2, sticky='w', padx=4)
-        self.a_var = tk.StringVar(value='4')
+        self.a_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.a_var, width=8).grid(row=5, column=3, sticky='w')
         ttk.Label(form, text="Groove width [mm]:").grid(row=6, column=0, sticky='w', padx=4, pady=4)
-        self.b_var = tk.StringVar(value='2')
+        self.b_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.b_var, width=8).grid(row=6, column=1, sticky='w')
         ttk.Label(form, text="Section N:").grid(row=6, column=2, sticky='w', padx=4)
-        self.n_var = tk.StringVar(value='16')
+        self.n_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.n_var, width=8).grid(row=6, column=3, sticky='w')
 
         ttk.Label(form, text="Conductor material:").grid(
             row=7, column=0, sticky='w', padx=4, pady=4)
-        self.material_var = tk.StringVar(value='Cu')
+        self.material_var = tk.StringVar(value='')
         material_values = [*CONDUCTOR_MATERIAL_RESISTIVITY, 'Custom']
         self.material_combo = ttk.Combobox(
             form, textvariable=self.material_var, values=material_values,
@@ -234,8 +234,7 @@ class PipelinePanel(ttk.Frame):
             '<<ComboboxSelected>>', lambda _event: self._on_material_changed())
         ttk.Label(form, text="Resistivity [ohm.m]:").grid(
             row=7, column=2, sticky='w', padx=4)
-        self.resistivity_var = tk.StringVar(
-            value=f"{CONDUCTOR_MATERIAL_RESISTIVITY['Cu']:.3g}")
+        self.resistivity_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.resistivity_var, width=10).grid(
             row=7, column=3, sticky='w')
 
@@ -263,12 +262,12 @@ class PipelinePanel(ttk.Frame):
         # Radial peel removed from each face after boolean (% of cable radial height).
         self.margin_label = ttk.Label(form, text="Radial trim (% cable height):")
         self.margin_label.grid(row=10, column=0, sticky='w', padx=4, pady=2)
-        self.margin_var = tk.StringVar(value='50')
+        self.margin_var = tk.StringVar(value='')
         self.margin_entry = ttk.Entry(form, textvariable=self.margin_var, width=6)
         self.margin_entry.grid(row=10, column=1, sticky='w')
         ttk.Label(form, text="Gap between layers [mm]:").grid(
             row=11, column=0, sticky='w', padx=4, pady=2)
-        self.layer_gap_var = tk.StringVar(value='0')
+        self.layer_gap_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.layer_gap_var, width=6).grid(
             row=11, column=1, sticky='w')
         self.b0_marker_var = tk.BooleanVar(value=True)
@@ -342,7 +341,7 @@ class PipelinePanel(ttk.Frame):
         for var in (self.radius_var, self.height_var, self.cw_var, self.a_var,
                     self.b_var, self.margin_var, self.layer_gap_var,
                     self.roi_var, self.roi_rx_var, self.roi_ry_var,
-                    self.roi_rz_var, self.axis_var):
+                    self.roi_rz_var, self.axis_var, self.n_var, self.material_var, self.resistivity_var):
             var.trace_add('write', lambda *_: self._redraw_previews())
         self._redraw_previews()
 
@@ -577,7 +576,8 @@ class PipelinePanel(ttk.Frame):
         self._apply_wire_geometry(cfg)
         cfg.wire.cross_section_n = int(self.n_var.get())
         self._apply_material(cfg)
-        cfg.shell.auto_margin_pct = float(self.margin_var.get()) / 100.0
+        if self.shell_mode_var.get() != 'custom':
+            cfg.shell.auto_margin_pct = float(self.margin_var.get()) / 100.0
         cfg.winding.layer_gap_mm = mm_to_m(self.layer_gap_var.get())
         cfg.winding.normal_shift = None
         if self.roi_ellipsoidal_var.get():
@@ -599,6 +599,19 @@ class PipelinePanel(ttk.Frame):
             cfg.cylinder.height = mm_to_m(self.height_var.get())
         self.coilgen_advanced.apply_to(cfg)
         return cfg
+
+    def _missing_main_values(self, *, preview=False):
+        variables = [self.cw_var, self.a_var, self.b_var, self.n_var, self.material_var,
+                     self.resistivity_var, self.layer_gap_var]
+        if self.shell_mode_var.get() != 'custom':
+            variables.extend((self.radius_var, self.height_var, self.margin_var))
+        if self.roi_ellipsoidal_var.get():
+            variables.extend((self.roi_rx_var, self.roi_ry_var, self.roi_rz_var))
+        else:
+            variables.append(self.roi_var)
+        if not preview:
+            variables.extend((self.tikhonov_var, self.levels_var))
+        return any(not variable.get().strip() for variable in variables)
 
     def _redraw_previews(self):
         self._redraw_cylinder_preview()
@@ -689,6 +702,9 @@ class PipelinePanel(ttk.Frame):
         Physical frame shared with CoilGen and exported wire: bore along +Z.
         The ROI semiaxes and B0 are shown in these physical X/Y/Z coordinates.
         """
+        if self._missing_main_values(preview=True):
+            self._geo3d_show_message(self.root.tr('Enter the design values to see the preview.'), color='#666666')
+            return
         try:
             cfg = self._preview_cfg()
         except ValueError:
@@ -907,6 +923,9 @@ class PipelinePanel(ttk.Frame):
 
     def _redraw_cylinder_preview(self):
         """Zoomed quadrant of the shell wall with layers, gap, and grooves."""
+        if self._missing_main_values(preview=True):
+            self._cyl_show_message(self.root.tr('Enter the design values to see the preview.'), color='#666666')
+            return
         try:
             cfg = self._preview_cfg()
         except ValueError:
@@ -1147,6 +1166,8 @@ class PipelinePanel(ttk.Frame):
         self.cyl_mpl_canvas.draw_idle()
 
     def _build_cfg(self) -> Config:
+        if self._missing_main_values():
+            raise ValueError(self.root.tr('Complete the required design fields before running.'))
         cfg = Config(
             gradient_axis=self.axis_var.get(),
             b0_direction=self.root.b0_var.get(),

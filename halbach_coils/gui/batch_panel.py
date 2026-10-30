@@ -77,7 +77,7 @@ class BatchPanel(ttk.Frame):
         self.a_var = self._entry(shared, 7, 'Groove deformation A:', '2')
         self.b_var = self._entry(shared, 8, 'Groove deformation B:', '1')
         ttk.Label(shared, text='Conductor material:').grid(row=9, column=0, sticky='w', pady=3)
-        self.material_var = tk.StringVar(self, value='Cu')
+        self.material_var = tk.StringVar(self, value='')
         material = ttk.Combobox(shared, textvariable=self.material_var,
                                 values=[*CONDUCTOR_MATERIAL_RESISTIVITY, 'Custom'],
                                 state='readonly', width=13)
@@ -115,10 +115,10 @@ class BatchPanel(ttk.Frame):
                                     variable=self.enabled_vars[axis])
             label.grid(row=row, column=0, padx=3, pady=3)
             self._layer_rows[axis] = [label]
-            self.cable_vars[axis] = tk.StringVar(self, value='2')
-            self.layer_gap_vars[axis] = tk.StringVar(self, value='0')
-            self.tikhonov_vars[axis] = tk.StringVar(self, value='2500')
-            self.levels_vars[axis] = tk.StringVar(self, value='12')
+            self.cable_vars[axis] = tk.StringVar(self, value='')
+            self.layer_gap_vars[axis] = tk.StringVar(self, value='')
+            self.tikhonov_vars[axis] = tk.StringVar(self, value='')
+            self.levels_vars[axis] = tk.StringVar(self, value='')
             for col, var in enumerate((self.cable_vars[axis], self.layer_gap_vars[axis], self.tikhonov_vars[axis],
                                        self.levels_vars[axis]), 1):
                 entry = ttk.Entry(layers, textvariable=var, width=8)
@@ -225,7 +225,7 @@ class BatchPanel(ttk.Frame):
 
     def _entry(self, parent, row, label, value):
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky='w', pady=3)
-        variable = tk.StringVar(self, value=value)
+        variable = tk.StringVar(self, value='')
         entry = ttk.Entry(parent, textvariable=variable, width=14)
         entry.grid(row=row, column=1, sticky='e', padx=3)
         self._entries[str(variable)] = entry
@@ -268,6 +268,8 @@ class BatchPanel(ttk.Frame):
                       if part.strip().lower() in selected)
         if not order:
             raise ValueError('Select at least one gradient (X, Y or Z), without duplicates.')
+        if self._missing_main_values():
+            raise ValueError(self.root.tr('Complete the required design fields before running.'))
         base = self._base_config()
         key_values = ((float(self.key_length_var.get()) / 1000,
                        float(self.key_width_var.get()) / 1000,
@@ -297,6 +299,17 @@ class BatchPanel(ttk.Frame):
         )
         build_layer_configs(cfg)
         return cfg
+
+    def _missing_main_values(self):
+        variables = [self.height_var, self.anchor_radius_var, self.radial_gap_var,
+                     self.a_var, self.b_var, self.material_var, self.resistivity_var, *self.roi_vars.values()]
+        selected = [axis for axis in 'xyz' if self.enabled_vars[axis].get()]
+        for axis in selected:
+            variables.extend((self.cable_vars[axis], self.layer_gap_vars[axis],
+                              self.tikhonov_vars[axis], self.levels_vars[axis]))
+        if self.keys_var.get() and len(selected) > 1:
+            variables.extend((self.key_length_var, self.key_width_var, self.fit_clearance_var))
+        return any(not variable.get().strip() for variable in variables)
 
     def _schedule_preview(self, *_args):
         if self._preview_pending is not None:
@@ -338,6 +351,18 @@ class BatchPanel(ttk.Frame):
                     text=self.root.tr('{axis}: excluded from batch', axis='G'+axis.upper()))
         for child in self.key_dimensions.winfo_children():
             child.configure(state='normal' if self.keys_var.get() and selected_count > 1 else 'disabled')
+        if selected_count and self._missing_main_values():
+            self._last_layers = None
+            self.ax3d.clear()
+            self.radial_ax.clear()
+            for axis in 'xyz':
+                if self.enabled_vars[axis].get():
+                    self.radius_labels[axis].configure(text='')
+            self.total_radius_label.configure(text='')
+            self.preview_notice.configure(text=self.root.tr('Enter the design values to see the preview.'),
+                                          foreground='#666666')
+            self.figure_canvas.draw_idle()
+            return
         try:
             from halbach_coils.coilgen.batch import build_layer_configs
             cfg = self._build_cfg()

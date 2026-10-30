@@ -17,6 +17,8 @@ LANGUAGES = {"en": "English", "es": "Español"}
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "es": {
+        'Enter the design values to see the preview.': 'Introduce los valores de diseño para ver la vista previa.',
+        'Complete the required design fields before running.': 'Completa los campos de diseño requeridos antes de ejecutar.',
         'Design needs revision': 'El diseño necesita revisión',
         'Diagnostic files kept in:\n{path}': 'Archivos de diagnóstico conservados en:\n{path}',
         'Winding geometry': 'Geometría del bobinado',

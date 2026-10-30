@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'halbach_coils'))
 
 
 @pytest.fixture
-def app():
+def app(fill_gui_design):
     import tkinter as tk
     from gui.main_window import CoilGenApp
 
@@ -21,6 +21,7 @@ def app():
         raise
     window.withdraw()
     window.update()
+    fill_gui_design(window)
     yield window
     window.destroy()
 

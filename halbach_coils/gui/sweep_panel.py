@@ -3,7 +3,7 @@ Tikhonov sweep panel.
 
 Select dimensions and Tikhonov sweep limits, toggle fine adjustment, and run
 the headless sweep. Results are shown in a table and saved as CSV/TXT in the
-output directory. Suggested widened range for Gz is pre-filled.
+output directory. Main design and sweep fields start empty.
 """
 
 from __future__ import annotations
@@ -48,26 +48,25 @@ class SweepPanel(ttk.Frame):
         axis_combo = ttk.Combobox(form, textvariable=self.axis_var,
                                   values=['x', 'y', 'z'], state='readonly', width=6)
         axis_combo.grid(row=0, column=1, sticky='w')
-        axis_combo.bind('<<ComboboxSelected>>', lambda _e: self._fill_defaults())
 
         ttk.Label(form, text="Outer radius [mm]:").grid(row=1, column=0, sticky='w', padx=4, pady=4)
-        self.radius_var = tk.StringVar(value='39')
+        self.radius_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.radius_var, width=10).grid(row=1, column=1, sticky='w')
         ttk.Label(form, text="Height [mm]:").grid(row=1, column=2, sticky='w', padx=4)
-        self.height_var = tk.StringVar(value='170')
+        self.height_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.height_var, width=10).grid(row=1, column=3, sticky='w')
         ttk.Label(form, text="ROI radius [mm]:").grid(
             row=2, column=0, sticky='w', padx=4, pady=4)
-        self.roi_var = tk.StringVar(value='20')
+        self.roi_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.roi_var, width=10).grid(
             row=2, column=1, sticky='w')
         ttk.Label(form, text="Levels:").grid(row=2, column=2, sticky='w', padx=4)
-        self.levels_var = tk.StringVar(value='12')
+        self.levels_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.levels_var, width=8).grid(row=2, column=3, sticky='w')
 
         ttk.Label(form, text="Conductor material:").grid(
             row=3, column=0, sticky='w', padx=4, pady=4)
-        self.material_var = tk.StringVar(value='Cu')
+        self.material_var = tk.StringVar(value='')
         material_combo = ttk.Combobox(
             form, textvariable=self.material_var,
             values=[*CONDUCTOR_MATERIAL_RESISTIVITY, 'Custom'],
@@ -78,34 +77,31 @@ class SweepPanel(ttk.Frame):
             '<<ComboboxSelected>>', lambda _event: self._on_material_changed())
         ttk.Label(form, text="Resistivity [ohm.m]:").grid(
             row=3, column=2, sticky='w', padx=4)
-        self.resistivity_var = tk.StringVar(
-            value=f"{CONDUCTOR_MATERIAL_RESISTIVITY['Cu']:.3g}")
+        self.resistivity_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.resistivity_var, width=10).grid(
             row=3, column=3, sticky='w')
 
         ttk.Label(form, text="Tikhonov min:").grid(row=4, column=0, sticky='w', padx=4, pady=4)
-        self.tk_min_var = tk.StringVar(value='1')
+        self.tk_min_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.tk_min_var, width=10).grid(row=4, column=1, sticky='w')
         ttk.Label(form, text="Tikhonov max:").grid(row=4, column=2, sticky='w', padx=4)
-        self.tk_max_var = tk.StringVar(value='1000000')
+        self.tk_max_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.tk_max_var, width=12).grid(row=4, column=3, sticky='w')
         ttk.Label(form, text="Coarse points:").grid(row=5, column=0, sticky='w', padx=4, pady=4)
-        self.n_coarse_var = tk.StringVar(value='12')
+        self.n_coarse_var = tk.StringVar(value='')
         ttk.Entry(form, textvariable=self.n_coarse_var, width=8).grid(row=5, column=1, sticky='w')
         self.fine_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(form, text="Fine adjustment", variable=self.fine_var).grid(row=5, column=2, columnspan=2, sticky='w')
 
         ttk.Label(form, text="Simultaneous processes:").grid(
             row=6, column=0, sticky='w', padx=4, pady=4)
-        self.processes_var = tk.StringVar(value='1')
+        self.processes_var = tk.StringVar(value='')
         self.processes_spin = ttk.Spinbox(
             form, textvariable=self.processes_var, from_=1,
             to=sweep_mod.MAX_SWEEP_PROCESSES, width=8)
         self.processes_spin.grid(row=6, column=1, sticky='w')
         ttk.Label(form, text="1 = sequential").grid(
             row=6, column=2, columnspan=2, sticky='w', padx=4)
-
-        self._fill_defaults()
 
         self.coilgen_advanced = AdvancedControls(self, root=self.root)
         self.coilgen_advanced.pack(fill='x', padx=8, pady=4)
@@ -149,13 +145,6 @@ class SweepPanel(ttk.Frame):
         self.log_text.configure(yscrollcommand=lsb.set)
 
         self.runner = WorkerRunner(self.log_text, self.progress, self.root)
-
-    def _fill_defaults(self):
-        axis = self.axis_var.get()
-        d_min, d_max, d_n = sweep_mod.DEFAULT_RANGES.get(axis, (1.0, 100000.0, 10))
-        self.tk_min_var.set(str(int(d_min)))
-        self.tk_max_var.set(str(int(d_max)))
-        self.n_coarse_var.set(str(d_n))
 
     def _on_material_changed(self):
         resistivity = CONDUCTOR_MATERIAL_RESISTIVITY.get(self.material_var.get())
@@ -242,6 +231,11 @@ class SweepPanel(ttk.Frame):
                                    self.root.tr("Select an output directory first."))
             return
         try:
+            required = (self.radius_var, self.height_var, self.roi_var, self.levels_var, self.material_var,
+                        self.resistivity_var, self.tk_min_var, self.tk_max_var,
+                        self.n_coarse_var, self.processes_var)
+            if any(not variable.get().strip() for variable in required):
+                raise ValueError(self.root.tr('Complete the required design fields before running.'))
             cfg = Config(gradient_axis=self.axis_var.get(),
                          b0_direction=self.root.b0_var.get(),
                          num_levels=int(self.levels_var.get()),

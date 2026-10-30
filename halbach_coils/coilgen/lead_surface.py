@@ -168,7 +168,7 @@ def quintic(p0, p1, d0, d1, dd0=None):
     return c
 
 
-def eval_surface(c, t, R, e1, e2, axis, origin):
+def eval_surface(c, t, R, e1, e2, axis, origin, radial_profile=None):
     uv = np.polynomial.polynomial.polyval(t, c).T
     d = np.polynomial.polynomial.polyval(t, np.arange(1,6)[:, None]*c[1:]).T
     dd = np.polynomial.polynomial.polyval(t, (np.arange(2,6)*np.arange(1,5))[:, None]*c[2:]).T
@@ -178,15 +178,33 @@ def eval_surface(c, t, R, e1, e2, axis, origin):
     p = origin + R*n + uv[:, 1, None]*axis
     dp = d[:, 0, None]*circum + d[:, 1, None]*axis
     ddp = dd[:, 0, None]*circum - (d[:, 0]**2/R)[:, None]*n + dd[:, 1, None]*axis
+    if radial_profile is not None:
+        radial_speed, duration = radial_profile
+        u = np.minimum(t/duration, 1.)
+        # Integrate a smooth, monotonically braking radial velocity. Its
+        # derivative and acceleration vanish at the end of the short blend.
+        rho = R+radial_speed*duration*(u-u**3+.5*u**4)
+        dr = radial_speed*(1-3*u**2+2*u**3)
+        ddr = radial_speed/duration*(-6*u+6*u**2)
+        angle_speed, angle_accel = d[:, 0]/R, dd[:, 0]/R
+        p = origin+rho[:, None]*n+uv[:, 1, None]*axis
+        dp = dr[:, None]*n+(rho*angle_speed)[:, None]*circum+d[:, 1, None]*axis
+        ddp = ((ddr-rho*angle_speed**2)[:, None]*n
+               +(2*dr*angle_speed+rho*angle_accel)[:, None]*circum+dd[:, 1, None]*axis)
     speed = np.linalg.norm(dp, axis=1)
     if np.any(speed < 1e-8):
         raise GeometryRejected("Stationary point on lead")
     curvature = np.linalg.norm(np.cross(dp, ddp), axis=1)/speed**3
-    return p, unit(dp), n, curvature
+    tangent = unit(dp)
+    if radial_profile is not None:
+        # An orthonormal section frame preserves the actual input polygon
+        # when the tangent has a radial component.
+        n = unit(n-np.sum(n*tangent, axis=1)[:, None]*tangent)
+    return p, tangent, n, curvature
 
 
 def surface_lead(ring, outward, axis, origin, exit_axial, angular_offset,
-                 handle_scale, options, initial_curvature=0.):
+                 handle_scale, options, initial_curvature=0., *, radial_bounds=None):
     """Preserve the input polygon, transported with a radial section axis."""
     center = ring.mean(0)
     e1 = unit(radial(center[None], axis, origin)[0])
@@ -194,25 +212,45 @@ def surface_lead(ring, outward, axis, origin, exit_axial, angular_offset,
     R = np.linalg.norm(radial(center[None], axis, origin)[0])
     t0 = unit(outward - np.dot(outward, e1)*e1)
     junction_angle = float(np.degrees(np.arccos(np.clip(unit(outward) @ t0, -1, 1))))
-    if junction_angle > 1.0:
-        raise GeometryRejected("Junction tangent differs by more than one degree")
+    projected_residual = float(np.max(np.abs((ring-center) @ t0)))
+    continue_radially = junction_angle > 1.0 or projected_residual > 2e-5
+    if continue_radially:
+        if radial_bounds is None:
+            raise GeometryRejected("Junction tangent differs by more than one degree" if junction_angle > 1.0
+                                   else "Input ring not normal to the outward tangent")
+        t0 = unit(outward)
     start = np.array([0., np.dot(center-origin, axis)])
     end = np.array([angular_offset*R, exit_axial])
     distance = np.linalg.norm(end-start)
     speed = distance*handle_scale
+    radial_profile = None
+    if continue_radially:
+        # Faceted cylinders and bounded winding repair can tilt a valid cut
+        # plane. Continue its exact tangent before settling onto a cylinder;
+        # never rotate/deform the shared ring or enlarge the winding envelope.
+        radial_speed = float(t0 @ e1)*speed
+        blend_length = max(.001, 3*options.min_bend_radius*abs(float(t0 @ e1)))
+        duration = min(1., blend_length/speed)
+        final_radius = R+.5*radial_speed*duration
+        if (min(R, final_radius) < radial_bounds[0]-1e-10
+                or max(R, final_radius) > radial_bounds[1]+1e-10):
+            raise GeometryRejected("Lead radius leaves the winding envelope")
+        radial_profile = (radial_speed, duration)
     d0 = np.array([np.dot(t0, e2), np.dot(t0, axis)])*speed
     d1 = np.array([0., np.sign(exit_axial-start[1])*distance])
     dd0 = initial_curvature*speed**2*np.array([-d0[1], d0[0]])/speed
     coeff = quintic(start, end, d0, d1, dd0)
     dense_t = np.linspace(0, 1, max(513, int(distance/options.max_step)*5))
-    dense, _, _, curvature = eval_surface(coeff, dense_t, R, e1, e2, axis, origin)
+    dense, _, _, curvature = eval_surface(coeff, dense_t, R, e1, e2, axis, origin, radial_profile)
     min_radius = 1/max(float(curvature.max()), 1e-12)
     if min_radius < options.min_bend_radius:
         raise GeometryRejected("Bend radius below minimum")
     arclen = np.r_[0., np.cumsum(np.linalg.norm(np.diff(dense, axis=0), axis=1))]
     sample_s = np.linspace(0, arclen[-1], int(np.ceil(arclen[-1]/options.max_step))+1)
     sample_t = np.interp(sample_s, arclen, dense_t)
-    path, T, N, _ = eval_surface(coeff, sample_t, R, e1, e2, axis, origin)
+    path, T, N, _ = eval_surface(coeff, sample_t, R, e1, e2, axis, origin, radial_profile)
+    if continue_radially:
+        junction_angle = float(np.degrees(np.arccos(np.clip(unit(outward) @ T[0], -1, 1))))
     B = unit(np.cross(T, N))
     offsets = ring-center
     coords = np.column_stack([offsets @ N[0], offsets @ B[0]])
@@ -236,6 +274,8 @@ def surface_lead(ring, outward, axis, origin, exit_axial, angular_offset,
         "junction_tangent_error_deg": junction_angle,
         "max_step_mm": float(np.linalg.norm(np.diff(path, axis=0), axis=1).max()*1000),
         "exit_tangent_error_deg": float(np.degrees(np.arccos(np.clip(abs(T[-1] @ axis), -1, 1)))),
+        "radial_continuation": continue_radially,
+        "radial_adjustment_mm": float((final_radius-R)*1000) if continue_radially else 0.,
     }
     return Lead(path, T, rings, min_radius, metrics)
 
@@ -395,6 +435,7 @@ def plan(ref, sector_ref, exit_sign=-1, options=None):
     centers = ref.rings.mean(1)
     radial_vectors = radial(centers, ref.axis, ref.origin)
     radii = np.linalg.norm(radial_vectors, axis=1)
+    radial_bounds = (float(radii.min()), float(radii.max()))
     sector = unit(np.asarray(sector_ref)-np.dot(sector_ref, ref.axis)*ref.axis)
     eligible = np.where(unit(radial_vectors) @ sector > np.cos(options.sector_angular_half))[0]
     if not len(eligible):
@@ -449,7 +490,8 @@ def plan(ref, sector_ref, exit_sign=-1, options=None):
                             if plane_t @ outward < 0:
                                 plane_t = -plane_t
                             lead = surface_lead(ref.rings[idx], plane_t, ref.axis, ref.origin,
-                                                exit_axial, offsets[k], handle, options)
+                                                exit_axial, offsets[k], handle, options,
+                                                radial_bounds=radial_bounds)
                             leads.append(lead)
                         clear = clearance_check(leads, centers[order], envelope, options.clearance, ref.rings[order])
                         result = attach(opened, leads)

@@ -158,6 +158,17 @@ def test_exported_current_path_is_numeric_signed_and_matches_connected_geometry(
     report = json.loads((tmp_path/'wire_with_leads_lead_report.json').read_text())
     assert report['sweep_reversed_relative_to_current']
     assert report['leads'][0]['height_in_frame_mm'] == pytest.approx(4.)
+    from halbach_coils.coilgen.shell import _load_ordered_groove, ordered_groove_manifold, trimesh_from_manifold
+    rings, sides = _load_ordered_groove(outputs[0])
+    union = trimesh_from_manifold(ordered_groove_manifold(rings, sides))
+    exported = trimesh.load_mesh(outputs[0])
+    assert union.is_volume and len(union.split()) == 1
+    assert union.volume == pytest.approx(exported.volume, rel=1e-6)
+    np.testing.assert_allclose(union.bounds, exported.bounds, atol=1e-8)
+    with open(outputs[0], 'ab') as stream:
+        stream.write(b'changed')
+    with pytest.raises(ValueError, match='does not match'):
+        _load_ordered_groove(outputs[0])
 
 
 def test_stale_or_missing_reference_never_falls_back_to_deforming_legacy_method(tmp_path):
@@ -178,6 +189,16 @@ def test_stale_or_missing_reference_never_falls_back_to_deforming_legacy_method(
 def test_impossible_bend_never_produces_a_candidate():
     with pytest.raises(GeometryRejected, match='No feasible'):
         plan(saddle_reference(), [1, 0, 0], 1, Options(min_bend_radius=1., candidates=1))
+
+
+def test_an_already_valid_surface_lead_keeps_its_exact_original_trajectory():
+    ref = saddle_reference()
+    args = (ref.rings[0], np.array([0., 1., 0.]), ref.axis, ref.origin, .115, .6, 1., Options())
+    original = surface_lead(*args)
+    bounded = surface_lead(*args, radial_bounds=(.035, .043))
+    assert not bounded.metrics['radial_continuation']
+    np.testing.assert_array_equal(bounded.path, original.path)
+    np.testing.assert_array_equal(bounded.rings, original.rings)
 
 
 def test_gz_default_sector_routes_the_saddle_without_relaxing_constraints():

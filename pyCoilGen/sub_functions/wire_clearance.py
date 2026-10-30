@@ -369,7 +369,10 @@ def ensure_wire_clearance(part, input_args):
     repaired, report = separate_cylindrical_path(
         working, float(input_args.conductor_thickness),
         (float(vertices[:, 2].min()), float(vertices[:, 2].max())))
-    if report.get('reason') == 'crossing_requires_different_routing':
+    # A failed fixed-radius separation can still be resolved spatially even
+    # when the initial contact is not almost coincident. A distance-only
+    # crossing heuristic otherwise skips this recovery for ramp contacts.
+    if report['status'] == 'unresolved' and report.get('reason') != 'unsupported_cylinder':
         initial = report
         for width in (1., .5):
             repaired, report = separate_crossing_branches(
@@ -379,6 +382,7 @@ def ensure_wire_clearance(part, input_args):
             if report['status'] == 'repaired':
                 report['algorithm'] = 'bounded_spatial_crossing_recovery_v1'
                 report['smoothing_width_diameters'] = width
+                report['cylindrical_recovery'] = initial
                 break
         else:
             initial['spatial_recovery'] = report

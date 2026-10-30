@@ -1,5 +1,9 @@
 # Incomplete Gx runs after the cylinder mesh change
 
+The subsequent zero-gap 20-level case and its correction are documented in
+[DENSE_ZERO_GAP_ROUTING.md](DENSE_ZERO_GAP_ROUTING.md). The results below retain
+the earlier investigation's configuration and historical status.
+
 ## Confirmed cause
 
 The reported Gx run was stopped by a coordinate-projection bug after its wire

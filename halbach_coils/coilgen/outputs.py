@@ -12,7 +12,7 @@ from .output_layout import name, locate, variants, remember_language, language_f
 
 def result_subfolder(filename: str, language: str = 'en') -> str | None:
     """Only recognize application outputs; leave unrelated user files alone."""
-    if filename.endswith('_geometry.json'):
+    if filename.endswith(('_geometry.json', '_return_paths.json', '_return_paths.npz')):
         return name('diagnostics', language)
     if '_field_' in filename and filename.endswith('.png'):
         return name('plots', language) + ('' if '_with_leads' in filename else '/CoilGen')
@@ -125,6 +125,28 @@ def write_result_summary(output_dir, *, stem='', error=None, language='en') -> s
             text('Maximum automatic adjustment: ', 'Ajuste automático máximo: ') + f"{max(adjustments, default=0.):.6g} mm",
             text('Winding check: ', 'Comprobación del bobinado: ') + str(geometry_path.relative_to(root)), '',
         ])
+        descriptions = {
+            'joint_applied': ('joint reassignment applied', 'reasignación conjunta aplicada'),
+            'joint_exact_support_applied': ('joint assignment using exact smoothing support',
+                                            'reasignación conjunta con soporte exacto del suavizado'),
+            'joint_incompatible': ('grouping incompatible; historical selection retained',
+                                   'agrupación incompatible; se conservó la selección histórica'),
+            'historical_sufficient': ('historical selection kept', 'se conservó la selección histórica'),
+            'historical_insufficient': ('historical selection has unresolved radial factors',
+                                        'selección histórica con factores radiales insuficientes'),
+            'reassignment_disabled': ('joint reassignment disabled', 'reasignación conjunta desactivada'),
+            'no_crossings': ('no UV crossings detected', 'sin cruces UV detectados'),
+            'normal_shift_skipped': ('normal shift skipped', 'desplazamiento normal omitido'),
+        }
+        for plan in geometry.get('return_paths', []):
+            description = descriptions.get(plan.get('status'))
+            if description:
+                lines.append(text('Return-path layer selection: ', 'Selección de capas de retornos: ')+text(*description))
+            if plan.get('trace_file'):
+                lines.append(text('Return-path evidence: ', 'Registro de retornos: ')+
+                             str(Path(name('diagnostics', language))/plan['trace_file']))
+        if geometry.get('return_paths'):
+            lines.append('')
     if metrics_path:
         result = json.loads(metrics_path.read_text(encoding='utf-8'))
         fh = result['fasthenry']

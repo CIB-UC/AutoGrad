@@ -180,6 +180,13 @@ def _run_pipeline(cfg: Config, should_stop=None, ask_user=None,
         geometry_report_path = _metrics.get('geometry_report_path')
         del _solution
         print()
+        distribution = _metrics.get('return_path_distribution',{})
+        if distribution.get('status') == 'unresolved':
+            from pyCoilGen.helpers.return_path_distribution import return_path_distribution_message
+            message = return_path_distribution_message(distribution,question_language)
+            print(message)
+            return PipelineResult(run_dir,field_plots=field_plots,needs_revision=True,message=message,
+                                  geometry_report_path=geometry_report_path)
         if collision_report is not None and collision_report.n_collisions > 0:
             physical_failure = collision_report.physical_interference_message(question_language)
             if physical_failure:

@@ -166,8 +166,15 @@ def create_sweep_along_surface(coil_parts: List[CoilPart], input_args, *,
                 point_inds_to_delete = point_inds_to_delete[:round(len(point_inds_to_delete) / 2)]
                 wire_path.v = np.delete(wire_path.v, point_inds_to_delete, axis=1)
                 wire_path.uv = np.delete(wire_path.uv, point_inds_to_delete, axis=1)
+                trace = getattr(coil_part, 'return_path_trace', None)
+                if trace is not None:
+                    trace['pruned_v'] = wire_path.v.copy()
+                    trace['pruned_uv'] = wire_path.uv.copy()
                 from .wire_clearance import ensure_wire_clearance
                 ensure_wire_clearance(coil_part, input_args)
+                if trace is not None:
+                    trace['recovered_v'] = wire_path.v.copy()
+                    trace['recovered_uv'] = wire_path.uv.copy()
                 if getattr(coil_part, 'clearance_report', {}).get('status') == 'repaired':
                     log.info('Recovered wire clearance: maximum adjustment %.4g mm.',
                              coil_part.clearance_report['max_displacement_mm'])

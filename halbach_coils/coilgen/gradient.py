@@ -134,6 +134,7 @@ def run_gradient(
         'normal_shift_length':           cfg.normal_shift_length,
         'normal_shift_smooth_factors':   cfg.winding.normal_shift_smooth,
         'reassign_crossing_layers':      cfg.winding.reassign_crossing_layers,
+        'save_return_path_trace':        True,
         'skip_postprocessing':          False,
         'auto_wire_clearance':          True,
         'skip_inductance_calculation':  True,
@@ -205,8 +206,14 @@ def run_gradient(
 
     # Physical feasibility is mandatory; the old flag controls verbosity only.
     overlap_report = detect_collisions(solution, cfg)
+    from pyCoilGen.helpers.return_path_distribution import solution_return_path_distribution
+    from pyCoilGen.sub_functions.return_path_trace import save_return_path_traces
+    distribution = solution_return_path_distribution(solution.coil_parts, solution.input_args)
+    metrics['return_path_distribution'] = distribution
+    save_return_path_traces(solution.coil_parts, solution.input_args, stage='final')
     geometry = {
-        'status': 'valid' if overlap_report.n_collisions == 0 else 'needs_revision',
+        'status': 'valid' if overlap_report.n_collisions == 0 and distribution['status']!='unresolved' else 'needs_revision',
+        'return_path_distribution': distribution,
         'stage': 'coil_only', 'required_separation_mm': cfg.wire.conductor_width*1000,
         'collision_sites': overlap_report.n_collisions,
         'minimum_found_mm': min((site.minimum_distance_m*1000
@@ -214,6 +221,8 @@ def run_gradient(
                                 if site.minimum_distance_m is not None), default=None),
         'parts': [getattr(part, 'clearance_report', {'status': 'not_attempted'})
                   for part in solution.coil_parts],
+        'return_paths': [getattr(part, 'return_path_report', {'status': 'not_recorded'})
+                         for part in solution.coil_parts],
     }
     if geometry['minimum_found_mm'] is None:
         geometry['minimum_found_mm'] = min((part['minimum_mm'] for part in geometry['parts']

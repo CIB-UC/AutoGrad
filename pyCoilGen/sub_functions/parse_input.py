@@ -224,6 +224,8 @@ def parse_input(parse_cli=True):
                         default=[2, 3, 2], help="Smoothing parameters regarding the normal shift")
     parser.add_argument('--reassign_crossing_layers', type=bool, default=True,
                         help='Allow joint reassignment of interacting crossings to radial layers')
+    parser.add_argument('--save_return_path_trace', type=bool, default=False,
+                        help='Save versioned layer decisions and geometry stages for exact replay')
 
     # Flag to skip the generation of a volumetric (3D) coil body
     parser.add_argument('--auto_wire_clearance', type=bool, default=False,

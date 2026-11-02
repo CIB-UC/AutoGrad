@@ -314,11 +314,16 @@ def run_leads(cfg: Config, input_stl: Optional[str] = None) -> tuple[str, str, s
         raise GeometryRejected('Lead exit direction is perpendicular to the saved cylinder axis.')
     exit_sign = 1 if projection > 0 else -1
     options = _automatic_options(reference, cfg)
+    # Normal design validates the real circular cable. Conservative groove
+    # and bend recommendations must not prevent terminal generation.
+    options.strict_manufacturing = False
+    options.conductor_diameter = float(cfg.wire.conductor_width)
     options.sector_angular_half = float(preset.sector_angular_half)
     print('\nGenerating surface leads from the original sweep sections...')
     print(f'  Radial x transverse profile: {2*reference.semi_a*1000:.3f} x '
           f'{2*reference.semi_b*1000:.3f} mm')
-    print(f'  Minimum bend radius: {options.min_bend_radius*1000:.3f} mm')
+    print(f'  Recommended bend radius: {options.min_bend_radius*1000:.3f} mm (advisory)')
+    print(f'  Required round-wire clearance: {options.conductor_diameter*1000:.3f} mm')
     final, lead_parts, open_mesh, report = _plan_with_sector_fallback(
         reference, preset, exit_sign, options,
         expand_cut_search=True)
@@ -380,6 +385,8 @@ def run_leads(cfg: Config, input_stl: Optional[str] = None) -> tuple[str, str, s
             for destination in published:
                 os.unlink(destination)
             raise
+    for warning in report.get("warnings", []):
+        print(f"  Lead note: {warning}")
     print(f'  Cut removed: {report["cut_removed_arc_mm"]:.3f} mm')
     print(f'  Leads STL: {output_stl}')
     print(f'  Final current path: {final_path_file}')

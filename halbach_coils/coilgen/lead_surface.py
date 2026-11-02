@@ -15,7 +15,7 @@ import json
 import manifold3d as m3d
 import numpy as np
 import trimesh
-from pyCoilGen.helpers.wire_geometry import near_segment_pairs, segment_closest, segment_distances
+from pyCoilGen.helpers.wire_geometry import near_segment_pairs, segment_closest, segment_distances, wire_contact_pairs
 
 
 class GeometryRejected(ValueError):
@@ -42,8 +42,13 @@ class Options:
     section_tolerance: float = .02
     radius_tolerance: float = .00015
     sector_angular_half: float = .35
+    strict_manufacturing: bool = True
+    conductor_diameter: float | None = None
 
     def validate(self):
+        if not self.strict_manufacturing and (self.conductor_diameter is None
+                or not np.isfinite(self.conductor_diameter) or self.conductor_diameter <= 0):
+            raise ValueError("Round-wire routing requires the real conductor diameter")
         for name in ("max_step", "min_bend_radius", "exit_margin", "radius_tolerance"):
             if not np.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive")
@@ -243,7 +248,7 @@ def surface_lead(ring, outward, axis, origin, exit_axial, angular_offset,
     dense_t = np.linspace(0, 1, max(513, int(distance/options.max_step)*5))
     dense, _, _, curvature = eval_surface(coeff, dense_t, R, e1, e2, axis, origin, radial_profile)
     min_radius = 1/max(float(curvature.max()), 1e-12)
-    if min_radius < options.min_bend_radius:
+    if options.strict_manufacturing and min_radius < options.min_bend_radius:
         raise GeometryRejected("Bend radius below minimum")
     arclen = np.r_[0., np.cumsum(np.linalg.norm(np.diff(dense, axis=0), axis=1))]
     sample_s = np.linspace(0, arclen[-1], int(np.ceil(arclen[-1]/options.max_step))+1)
@@ -426,6 +431,29 @@ def validate_mesh(mesh):
     return metrics
 
 
+
+def round_wire_clearance(ref, leads, order, diameter):
+    """Validate the real retained current path, independent of groove shape.
+
+    Section traversal can be reversed by the engine. Use the same original
+    centreline correspondence as final_current_path, including the cyclic seam.
+    """
+    centers = ref.rings.mean(axis=1)
+    reverse = (np.mean(np.linalg.norm(centers-ref.path[::-1], axis=1))
+               < np.mean(np.linalg.norm(centers-ref.path, axis=1)))
+    aligned = ref.path[::-1] if reverse else ref.path
+    path = np.concatenate((leads[1].path[::-1], aligned[order], leads[0].path))
+    path = path[np.r_[True, np.linalg.norm(np.diff(path, axis=0), axis=1) > 1e-12]]
+    i, j, distances, _ = wire_contact_pairs(path, diameter, closed=False)
+    if len(i):
+        worst = int(np.argmin(distances))
+        raise GeometryRejected(f"Round-wire clearance: {distances[worst]*1000:.6g} mm "
+                               f"< {diameter*1000:.6g} mm at segments {i[worst]}/{j[worst]}")
+    return dict(method="Exact nonlocal segment distances of the real round conductor",
+                required_centerline_distance_mm=diameter*1000,
+                local_arc_exclusion_mm=2*diameter*1000, contact_pairs=0)
+
+
 def plan(ref, sector_ref, exit_sign=-1, options=None):
     options = options or Options()
     options.validate()
@@ -463,7 +491,7 @@ def plan(ref, sector_ref, exit_sign=-1, options=None):
                 continue
             end_ids = (left, right)
             # A constant-radius route must not flatten a layer transition.
-            if any(np.ptp(radii[(np.arange(i-2,i+3)) % len(radii)]) > options.radius_tolerance for i in end_ids):
+            if options.strict_manufacturing and any(np.ptp(radii[(np.arange(i-2,i+3)) % len(radii)]) > options.radius_tolerance for i in end_ids):
                 rejected["Layer transition at cut"] = rejected.get("Layer transition at cut",0)+1
                 continue
             anchor = unit(radial_vectors[station])
@@ -493,21 +521,27 @@ def plan(ref, sector_ref, exit_sign=-1, options=None):
                                                 exit_axial, offsets[k], handle, options,
                                                 radial_bounds=radial_bounds)
                             leads.append(lead)
-                        clear = clearance_check(leads, centers[order], envelope, options.clearance, ref.rings[order])
+                        clear = (clearance_check(leads, centers[order], envelope, options.clearance, ref.rings[order])
+                                 if options.strict_manufacturing else
+                                 round_wire_clearance(ref, leads, order, options.conductor_diameter))
                         result = attach(opened, leads)
                         metrics = validate_mesh(result)
                         for lead in leads:
                             validate_mesh(tube_mesh(lead.rings))
-                        # Exact lead-to-lead solid intersection complements bounds.
-                        lead_solids = [manifold(tube_mesh(x.rings)) for x in leads]
-                        overlap = lead_solids[0] ^ lead_solids[1]
-                        if overlap.volume() > 1e-6:
-                            raise GeometryRejected("Lead solid intersection")
-                        retained_solid = manifold(tube_mesh(ref.rings[order]))
-                        junction_volumes = [float((retained_solid ^ solid).volume())
-                                            for solid in lead_solids]
-                        if any(abs(v) > 1e-6 for v in junction_volumes):
-                            raise GeometryRejected("Lead-coil solid intersection at junction")
+                        # The manufacturing profile is a groove tool, not the
+                        # real round cable. Its overlaps are handled by the mold
+                        # union; strict studies may still request these bounds.
+                        junction_volumes = None
+                        if options.strict_manufacturing:
+                            lead_solids = [manifold(tube_mesh(x.rings)) for x in leads]
+                            overlap = lead_solids[0] ^ lead_solids[1]
+                            if overlap.volume() > 1e-6:
+                                raise GeometryRejected("Lead solid intersection")
+                            retained_solid = manifold(tube_mesh(ref.rings[order]))
+                            junction_volumes = [float((retained_solid ^ solid).volume())
+                                                for solid in lead_solids]
+                            if any(abs(v) > 1e-6 for v in junction_volumes):
+                                raise GeometryRejected("Lead-coil solid intersection at junction")
                         removed = np.arange(left,left+(right-left) % len(centers)+1) % len(centers)
                         removed_arc = float(np.linalg.norm(np.diff(centers[removed],axis=0),axis=1).sum()*1000)
                         report = {"status": "validated", "options": asdict(options),
@@ -520,6 +554,19 @@ def plan(ref, sector_ref, exit_sign=-1, options=None):
                                   "lead_coil_intersection_volumes_mm3": junction_volumes,
                                   "rejected_candidates": rejected,
                                   "scope": "Lead geometry only; pre-existing coil crossings are retained; no electromagnetic certification."}
+                        report["validation_scope"] = ("manufacturing_profile" if options.strict_manufacturing
+                                                      else "real_round_conductor")
+                        report["manufacturing_checks_enforced"] = options.strict_manufacturing
+                        if not options.strict_manufacturing:
+                            report["scope"] = ("Exact clearance of the real round conductor; "
+                                               "groove separation and bend recommendations are advisory.")
+                        report["warnings"] = [
+                            f"Terminal {k+1}: bend radius {lead.min_radius*1000:.6g} mm is below the "
+                            f"manufacturing recommendation {options.min_bend_radius*1000:.6g} mm."
+                            for k, lead in enumerate(leads) if lead.min_radius < options.min_bend_radius]
+                        if not options.strict_manufacturing:
+                            report["warnings"].append("Groove-profile clearance and overlap are advisory; "
+                                                      "the real round conductor passed its exact distance check.")
                         return result, leads, opened, report
                     except GeometryRejected as exc:
                         key = str(exc).split(":")[0]

@@ -422,3 +422,19 @@ def test_report_other_permission_errors_propagate_immediately(tmp_path, monkeypa
     assert raised.value is error
     assert len(calls) == 1
     assert sleeps == []
+
+
+def test_distinct_rois_follow_gradient_when_reordered():
+    batch = _batch()
+    batch.axis_order = ('z', 'x', 'y')
+    batch.roi_dimensions = ((.021, .022, .023), (.024, .025, .026), (.015, .016, .017))
+    layers = build_layer_configs(batch)
+    assert [(c.target.rx, c.target.ry, c.target.rz) for c in layers] == [
+        (.015, .016, .017), (.021, .022, .023), (.024, .025, .026)]
+
+
+def test_outer_gradient_roi_can_exceed_innermost_radius():
+    batch = _batch()
+    batch.roi_dimensions = ((.027, .02, .02), (.02, .02, .02), (.02, .02, .02))
+    layers = build_layer_configs(batch)
+    assert next(c for c in layers if c.gradient_axis == 'x').target.rx == .027

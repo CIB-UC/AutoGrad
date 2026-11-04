@@ -203,3 +203,55 @@ def test_final_batch_marker_preview_uses_common_selected_side(app):
     panel._redraw_preview()
     patches = [patch for patch in panel.radial_ax.patches if (patch.get_gid() or '').startswith('b0-marker-')]
     assert all(np.mean(patch.get_xy()[:4], axis=0)[0] > 0 for patch in patches)
+
+
+def test_per_gradient_roi_and_spherical_checkbox(app):
+    from halbach_coils.coilgen.batch import build_layer_configs
+
+    panel = app.batch_panel
+    panel.order_var.set('Y, X, Z')
+    for axis, values in {'x': ('10', '11', '12'), 'y': ('13', '14', '15'),
+                         'z': ('16', '17', '18')}.items():
+        for dim, value in zip('xyz', values):
+            panel.roi_vars[axis][dim].set(value)
+    panel.roi_spherical_vars['y'].set(True)
+    panel._update_roi_entries()
+    panel.roi_vars['y']['y'].set('')
+    assert str(panel.roi_entries['y']['y'].cget('state')) == 'disabled'
+    layers = build_layer_configs(panel._build_cfg())
+    assert [(c.gradient_axis, c.target.rx, c.target.ry, c.target.rz) for c in layers] == [
+        ('y', .013, .013, .013), ('x', .01, .011, .012), ('z', .016, .017, .018)]
+    panel.roi_spherical_vars['y'].set(False)
+    panel._update_roi_entries()
+    assert str(panel.roi_entries['y']['y'].cget('state')) == 'normal'
+    assert panel._missing_main_values()
+
+
+def test_preview_accepts_different_spherical_rois(app):
+    panel = app.batch_panel
+    panel.anchor_radius_var.set('50')
+    for axis in 'xyz':
+        panel.roi_spherical_vars[axis].set(True)
+    panel.roi_vars['x']['x'].set('30')
+    panel._redraw_preview()
+    assert panel._last_layers is not None
+    assert 'must share' not in panel.preview_notice.cget('text')
+    assert {cfg.gradient_axis: cfg.target.rx for cfg in panel._last_layers} == {
+        'x': .03, 'y': .02, 'z': .02}
+
+
+def test_roi_visibility_controls_preview_without_changing_design(app):
+    panel = app.batch_panel
+    panel._redraw_preview()
+    def roi_ids():
+        return {item.get_gid() for item in panel.ax3d.collections
+                if (item.get_gid() or '').startswith('roi-')}
+    assert roi_ids() == {'roi-x', 'roi-y', 'roi-z'}
+    signature = panel._preview_signature()
+    panel.roi_visible_vars['x'].set(False)
+    panel._redraw_preview()
+    assert roi_ids() == {'roi-y', 'roi-z'}
+    assert panel._preview_signature() == signature
+    panel.roi_visible_vars['x'].set(True)
+    panel._redraw_preview()
+    assert roi_ids() == {'roi-x', 'roi-y', 'roi-z'}

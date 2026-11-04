@@ -292,12 +292,14 @@ def test_exported_solids_are_checked_again_for_interference(design, monkeypatch)
     assert not (Path(batch.output_dir) / 'Conjunto').exists()
 
 
-def test_shared_physical_frame_and_roi_are_required(design):
-    batch, configs, results = design
+def test_distinct_rois_are_accepted_but_physical_frame_is_shared(design):
+    batch, configs, _ = design
     configs = deepcopy(configs)
     configs[1].target.rx *= 1.1
+    assert assembly._configuration(batch, configs) == tuple(configs)
+    configs[1].cylinder.height *= 1.1
     with pytest.raises(ValueError, match='must share'):
-        assembly.finalize_batch(batch, configs, results)
+        assembly._configuration(batch, configs)
 
 
 def test_wrong_former_height_or_frame_is_rejected(design):
@@ -412,3 +414,13 @@ def test_disabled_batch_marks_preserve_original_unmarked_geometry(design):
         original = trimesh.load_mesh(_former(outcome))
         final = trimesh.load_mesh(output['part_paths'][cfg.gradient_axis])
         assert final.volume == pytest.approx(original.volume)
+
+
+def test_roi_union_covers_each_gradient(design):
+    _, configs, _ = design
+    configs = deepcopy(configs)
+    configs[1].target.rx = .02
+    union, _ = assembly._roi_union(configs)
+    bounds = assembly.trimesh_from_manifold(union).bounds
+    assert bounds[1, 0] >= 20
+    assert bounds[1, 1] >= 15

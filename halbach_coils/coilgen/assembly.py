@@ -59,16 +59,14 @@ def _configuration(batch, configs=None):
             or axes != selected):
         raise ValueError('Assembly configurations must match the selected gradients in layer order.')
     height = _positive(configs[0].cylinder.height, 'Cylinder height')
-    roi = np.array([configs[0].target.rx, configs[0].target.ry, configs[0].target.rz])
-    if not np.all(np.isfinite(roi)) or np.any(roi <= 0):
-        raise ValueError('Assembly ROI semi-axes must be finite and positive.')
     for cfg in configs:
+        roi = np.array([cfg.target.rx, cfg.target.ry, cfg.target.rz])
+        if not np.all(np.isfinite(roi)) or np.any(roi <= 0):
+            raise ValueError('Assembly ROI semi-axes must be finite and positive.')
         if (not np.allclose(cfg.rotated_cylinder_axis, [0, 0, 1], atol=1e-10)
                 or not math.isclose(cfg.cylinder.height, height, abs_tol=1e-10)
-                or cfg.b0_direction != configs[0].b0_direction
-                or not np.allclose([cfg.target.rx, cfg.target.ry, cfg.target.rz], roi,
-                                   atol=1e-12, rtol=0)):
-            raise ValueError('Assembly layers must share longitudinal Z, height, B0 and ROI.')
+                or cfg.b0_direction != configs[0].b0_direction):
+            raise ValueError('Assembly layers must share longitudinal Z, height and B0.')
         if cfg.shell.use_custom_stl or cfg.shell_inner_radius <= 0:
             raise ValueError('Assembly requires generated cylindrical formers with a positive bore.')
     for inner, outer in zip(configs, configs[1:]):
@@ -181,6 +179,14 @@ def _roi_solid(cfg):
     inflation = 1 / float(distance.min())
     radii = 1000 * np.array([cfg.target.rx, cfg.target.ry, cfg.target.rz])
     return sphere.scale(radii * inflation), inflation
+
+
+def _roi_union(configs):
+    solids = [_roi_solid(cfg) for cfg in configs]
+    union, inflation = solids[0]
+    for solid, _ in solids[1:]:
+        union = union + solid
+    return union, inflation
 
 
 def _one_output(root, group, pattern, label):
@@ -411,7 +417,7 @@ def finalize_batch(batch, configs, results):
         raise FileExistsError(f'Assembly already exists; refusing to overwrite: {destination}')
     loaded = [_load_layer(cfg, result) for cfg, result in zip(configs, results)]
     formers, conductors, sources = map(list, zip(*loaded))
-    roi, roi_inflation = _roi_solid(configs[0])
+    roi, roi_inflation = _roi_union(configs)
     current_paths = [_current_path(cfg, source) for cfg, source in zip(configs, sources)]
     conductor_checks = _check_conductors(configs, conductors, roi, current_paths)
     _check_formers(configs, formers, conductors, roi)
@@ -453,6 +459,8 @@ def finalize_batch(batch, configs, results):
                   'b0_direction': configs[0].b0_direction,
                   'roi_mm': [1000 * configs[0].target.rx, 1000 * configs[0].target.ry,
                              1000 * configs[0].target.rz],
+                  'roi_by_gradient_mm': {cfg.gradient_axis: [1000 * cfg.target.rx,
+                      1000 * cfg.target.ry, 1000 * cfg.target.rz] for cfg in configs},
                   'roi_conservative_scale': roi_inflation,
                   'intersection_tolerance_mm3': VOLUME_TOL_MM3,
                   'include_keys': bool(batch.include_keys), 'interfaces': interfaces,
@@ -466,7 +474,7 @@ def finalize_batch(batch, configs, results):
         (staging / report_name).write_text(json.dumps(report, indent=2, ensure_ascii=False,
                                                      allow_nan=False) + '\n', encoding='utf-8')
         staging.replace(destination)
-        print(f'  Assembly validated: {len(configs)} formers, final conductors and shared ROI.', flush=True)
+        print(f'  Assembly validated: {len(configs)} formers, final conductors and all ROIs.', flush=True)
         return {'part_paths': part_paths, 'scene_path': report['scene_path'],
                 'report_path': report['report_path'], 'interfaces': interfaces,
                 'b0_markers': marker_record,

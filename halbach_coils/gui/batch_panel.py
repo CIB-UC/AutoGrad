@@ -71,9 +71,6 @@ class BatchPanel(ttk.Frame):
                         value='outer').pack(side='left', padx=8)
         self.anchor_radius_var = self._entry(shared, 2, 'Reference radius [mm]:', '50')
         self.radial_gap_var = self._entry(shared, 3, 'Gap between gradients [mm]:', '0.3')
-        self.roi_vars = {}
-        for row, axis in enumerate('xyz', 4):
-            self.roi_vars[axis] = self._entry(shared, row, f'ROI R{axis} [mm]:', '20')
         self.a_var = self._entry(shared, 7, 'Groove deformation A:', '2')
         self.b_var = self._entry(shared, 8, 'Groove deformation B:', '1')
         ttk.Label(shared, text='Conductor material:').grid(row=9, column=0, sticky='w', pady=3)
@@ -92,6 +89,27 @@ class BatchPanel(ttk.Frame):
         ttk.Checkbutton(shared, text='Reassign nearby crossings between radial layers',
                         variable=self.reassign_crossings_var).grid(
             row=12, column=0, columnspan=2, sticky='w', pady=4)
+
+        roi_frame = ttk.LabelFrame(left, text='ROI per gradient [mm]', padding=8)
+        roi_frame.pack(fill='x', pady=4)
+        for col, label in enumerate(('Gradient', 'Rx', 'Ry', 'Rz')):
+            ttk.Label(roi_frame, text=label).grid(row=0, column=col, padx=3, pady=3)
+        self.roi_vars = {}
+        self.roi_spherical_vars = {}
+        self.roi_entries = {}
+        for row, axis in enumerate('xyz', 1):
+            ttk.Label(roi_frame, text='G' + axis.upper()).grid(row=row, column=0, padx=3)
+            self.roi_vars[axis] = {}
+            self.roi_entries[axis] = {}
+            self.roi_spherical_vars[axis] = tk.BooleanVar(self, value=False)
+            for col, dimension in enumerate('xyz', 1):
+                var = tk.StringVar(self, value='20')
+                self.roi_vars[axis][dimension] = var
+                entry = ttk.Entry(roi_frame, textvariable=var, width=8)
+                entry.grid(row=row, column=col, padx=3, pady=3)
+                self.roi_entries[axis][dimension] = entry
+            ttk.Checkbutton(roi_frame, text='Spherical', variable=self.roi_spherical_vars[axis],
+                            command=self._update_roi_entries).grid(row=row, column=4, padx=3)
 
         layers = ttk.LabelFrame(left, text='Layers: inner to outer', padding=8)
         layers.pack(fill='x', pady=4)
@@ -178,6 +196,16 @@ class BatchPanel(ttk.Frame):
         self.figure_canvas = FigureCanvasTkAgg(self.figure, master=previews)
         self.figure_canvas.get_tk_widget().pack(fill='both', expand=True)
         enable_3d_zoom(self.figure_canvas)
+        roi_visibility = ttk.Frame(previews)
+        roi_visibility.pack(fill='x', pady=3)
+        ttk.Label(roi_visibility, text='Show ROI:').pack(side='left')
+        self.roi_visible_vars = {}
+        for axis in 'xyz':
+            self.roi_visible_vars[axis] = tk.BooleanVar(self, value=True)
+            tk.Checkbutton(roi_visibility, text='G' + axis.upper(),
+                           fg=_COLORS[axis], selectcolor='white',
+                           variable=self.roi_visible_vars[axis],
+                           command=self._schedule_preview).pack(side='left', padx=3)
         self.preview_notice = ttk.Label(previews, wraplength=650, justify='left')
         self.preview_notice.pack(fill='x')
         results = ttk.Frame(previews)
@@ -202,7 +230,8 @@ class BatchPanel(ttk.Frame):
                      self.a_var, self.b_var, self.order_var, self.keys_var, self.b0_markers_var,
                      self.material_var, self.resistivity_var,
                      self.key_length_var, self.key_width_var, self.fit_clearance_var,
-                     *self.roi_vars.values(), *self.cable_vars.values(), *self.layer_gap_vars.values(),
+                     *(var for values in self.roi_vars.values() for var in values.values()),
+                     *self.roi_spherical_vars.values(), *self.cable_vars.values(), *self.layer_gap_vars.values(),
                      *self.tikhonov_vars.values(), *self.levels_vars.values(),
                      *self.enabled_vars.values()]
         for variable in variables:
@@ -249,8 +278,6 @@ class BatchPanel(ttk.Frame):
         cfg = Config(gradient_axis='x', b0_direction=self.root.b0_var.get(), show_plots=False)
         cfg.winding.reassign_crossing_layers = self.reassign_crossings_var.get()
         cfg.cylinder.height = float(self.height_var.get()) / 1000
-        cfg.target.rx, cfg.target.ry, cfg.target.rz = (
-            float(self.roi_vars[axis].get()) / 1000 for axis in 'xyz')
         cfg.wire.cross_section_a_frac = float(self.a_var.get())
         cfg.wire.cross_section_b_frac = float(self.b_var.get())
         cfg.fasthenry.material = self.material_var.get()
@@ -280,6 +307,10 @@ class BatchPanel(ttk.Frame):
             anchor_radius=float(self.anchor_radius_var.get()) / 1000,
             radius_mode=self.radius_mode_var.get(),
             axis_order=order,
+            roi_dimensions=tuple(
+                tuple(float(self.roi_vars[axis]['x' if self.roi_spherical_vars[axis].get() else dim].get()) / 1000
+                      for dim in 'xyz')
+                if axis in selected else None for axis in 'xyz'),
             radial_gap=float(self.radial_gap_var.get()) / 1000,
             conductor_widths=tuple(float(self.cable_vars[axis].get()) / 1000
                                    if axis in selected else base.wire.conductor_width for axis in 'xyz'),
@@ -302,14 +333,22 @@ class BatchPanel(ttk.Frame):
 
     def _missing_main_values(self):
         variables = [self.height_var, self.anchor_radius_var, self.radial_gap_var,
-                     self.a_var, self.b_var, self.material_var, self.resistivity_var, *self.roi_vars.values()]
+                     self.a_var, self.b_var, self.material_var, self.resistivity_var]
         selected = [axis for axis in 'xyz' if self.enabled_vars[axis].get()]
         for axis in selected:
+            variables.extend(self.roi_vars[axis][dim] for dim in
+                             ('x' if self.roi_spherical_vars[axis].get() else 'xyz'))
             variables.extend((self.cable_vars[axis], self.layer_gap_vars[axis],
                               self.tikhonov_vars[axis], self.levels_vars[axis]))
         if self.keys_var.get() and len(selected) > 1:
             variables.extend((self.key_length_var, self.key_width_var, self.fit_clearance_var))
         return any(not variable.get().strip() for variable in variables)
+
+    def _update_roi_entries(self):
+        for axis in 'xyz':
+            for dim in 'yz':
+                self.roi_entries[axis][dim].configure(
+                    state='disabled' if self.roi_spherical_vars[axis].get() else 'normal')
 
     def _schedule_preview(self, *_args):
         if self._preview_pending is not None:
@@ -454,10 +493,14 @@ class BatchPanel(ttk.Frame):
                                                      alpha=.85 if fill else .08))
         if batch.include_b0_markers:
             self._draw_b0_marks(batch, layers, height)
-        rx, ry, rz = (getattr(batch.base.target, 'r'+axis)*1000 for axis in 'xyz')
         u, v = np.meshgrid(np.linspace(0, 2*math.pi, 30), np.linspace(0, math.pi, 17))
-        ax.plot_surface(rx*np.cos(u)*np.sin(v), ry*np.sin(u)*np.sin(v), rz*np.cos(v),
-                        color='#2f80ed', alpha=.22, linewidth=0)
+        for cfg in layers:
+            if not self.roi_visible_vars[cfg.gradient_axis].get():
+                continue
+            rx, ry, rz = (getattr(cfg.target, 'r'+axis)*1000 for axis in 'xyz')
+            surface = ax.plot_surface(rx*np.cos(u)*np.sin(v), ry*np.sin(u)*np.sin(v), rz*np.cos(v),
+                                      color=_COLORS[cfg.gradient_axis], alpha=.18, linewidth=0)
+            surface.set_gid('roi-' + cfg.gradient_axis)
         outer = max(cfg.shell_outer_radius for cfg in layers)*1000
         wire_outer = max(gradient_radial_bounds(cfg)[1] for cfg in layers)*1000
         self.total_radius_label.configure(text=self.root.tr(

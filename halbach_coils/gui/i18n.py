@@ -54,6 +54,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Generate gradients simultaneously (one process each)":
             "Generar gradientes en simultáneo (un proceso por gradiente)",
         "Shared dimensions": "Dimensiones compartidas",
+        "ROI per gradient [mm]": "ROI por gradiente [mm]",
+        "Spherical": "Esférico",
+        "Show ROI:": "Mostrar ROI:",
+        "Gradient": "Gradiente",
         "Inner gradient radius": "Radio interior del gradiente",
         "Outer gradient radius": "Radio exterior del gradiente",
         "Radii and gap include the complete gradient: mold, cable and groove. Plastic faces are shown separately.":

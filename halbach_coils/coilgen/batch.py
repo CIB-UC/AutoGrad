@@ -48,6 +48,7 @@ class BatchConfig:
     cut_widths: tuple[float, float, float] | None = None
     shift_smooth_factors: tuple[tuple[int, int, int], ...] | None = None
     parallel_gradients: bool = False
+    roi_dimensions: tuple[tuple[float, float, float] | None, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -112,10 +113,19 @@ def build_layer_configs(batch: BatchConfig) -> tuple[Config, ...]:
     _positive(base.cylinder.height, 'Cylinder height')
     if not 0 < float(base.cylinder.mesh_length_factor) <= 1:
         raise ValueError('The winding length factor must lie between zero and one.')
-    roi = tuple(_positive(value, 'ROI semi-axis')
-                for value in (base.target.rx, base.target.ry, base.target.rz))
-    if roi[2] >= base.cylinder.height / 2:
-        raise ValueError('The ROI must fit inside the cylinder height.')
+    default_roi = (base.target.rx, base.target.ry, base.target.rz)
+    rois = batch.roi_dimensions if batch.roi_dimensions is not None else (default_roi,) * 3
+    if len(rois) != 3:
+        raise ValueError('Supply three ROI dimensions in X, Y, Z gradient order.')
+    selected_rois = {}
+    for axis in order:
+        roi = rois['xyz'.index(axis)]
+        if roi is None or len(roi) != 3:
+            raise ValueError('Each selected gradient requires three ROI semi-axes.')
+        roi = tuple(_positive(value, 'ROI semi-axis') for value in roi)
+        if roi[2] >= base.cylinder.height / 2:
+            raise ValueError('The ROI must fit inside the cylinder height.')
+        selected_rois[axis] = roi
 
     factors = batch.tikhonov_factors
     if factors is None:
@@ -158,6 +168,7 @@ def build_layer_configs(batch: BatchConfig) -> tuple[Config, ...]:
         # Choose one clear B0 side jointly after all selected shells are available.
         cfg.shell.b0_marker = False
         cfg.gradient_axis = axis
+        cfg.target.rx, cfg.target.ry, cfg.target.rz = selected_rois[axis]
         cfg.leads.preset = deepcopy(preset_for(axis))
         axis_index = 'xyz'.index(axis)
         cfg.tikhonov_factor = factors[axis_index]
@@ -182,10 +193,10 @@ def build_layer_configs(batch: BatchConfig) -> tuple[Config, ...]:
               for cfg, (low, high) in zip(configs, extents)]
     inner_radius = (anchor_radius if batch.radius_mode == 'inner' else
                     anchor_radius - sum(widths) - (len(configs) - 1) * gap)
-    if inner_radius <= max(roi[:2]):
-        raise ValueError('The ROI must fit inside the innermost gradient; increase the anchor radius or reduce thickness/gap.')
     next_inner = inner_radius
     for cfg, (protrudes_in, protrudes_out) in zip(configs, extents):
+        if next_inner <= max(cfg.target.rx, cfg.target.ry):
+            raise ValueError(f'{cfg.axis_label} ROI must fit inside its gradient; increase the anchor radius or reduce the ROI.')
         cfg.cylinder.radius = next_inner + protrudes_in + cfg.shell_wall_thickness
         next_inner = cfg.shell_outer_radius + protrudes_out + gap
     return tuple(configs)
@@ -195,6 +206,7 @@ def _layer_record(cfg: Config, index: int) -> dict:
     return {
         'layer': index + 1,
         'axis': cfg.gradient_axis,
+        'roi_semi_axes_m': [cfg.target.rx, cfg.target.ry, cfg.target.rz],
         'status': 'pending',
         'directory': f'{index + 1:02d}_G{cfg.gradient_axis}',
         'tikhonov_factor': cfg.tikhonov_factor,
@@ -394,10 +406,12 @@ def run_batch(batch: BatchConfig, should_stop=None, ask_user=None,
         'radial_gap_m': float(batch.radial_gap),
         'radial_gap_definition': 'complete_gradient_envelopes_including_cable_and_groove',
         'requires_interference_check': (
-            configs[0].estimated_wire_inner_radius <= max(configs[0].target.rx, configs[0].target.ry)
+            configs[0].estimated_wire_inner_radius <= max(max(cfg.target.rx, cfg.target.ry) for cfg in configs)
             or any(right.estimated_wire_inner_radius < left.estimated_wire_outer_radius
                    for left, right in zip(configs, configs[1:]))),
         'roi_m': [configs[0].target.rx, configs[0].target.ry, configs[0].target.rz],
+        'roi_by_gradient_m': {cfg.gradient_axis: [cfg.target.rx, cfg.target.ry, cfg.target.rz]
+                              for cfg in configs},
         'height_m': configs[0].cylinder.height,
         'include_keys': batch.include_keys,
         'include_b0_markers': batch.include_b0_markers,

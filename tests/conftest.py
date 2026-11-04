@@ -20,7 +20,7 @@ def fill_gui_design():
             getattr(batch, name).set(value)
         batch.material_var.set('Cu')
         batch._on_material_changed()
-        for var in batch.roi_vars.values():
+        for var in (var for dimensions in batch.roi_vars.values() for var in dimensions.values()):
             var.set('20')
         for group, value in ((batch.cable_vars,'2'), (batch.layer_gap_vars,'0'),
                              (batch.tikhonov_vars,'2500'), (batch.levels_vars,'12')):

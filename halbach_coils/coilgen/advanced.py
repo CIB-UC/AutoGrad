@@ -12,6 +12,10 @@ import re
 from dataclasses import dataclass
 
 
+DEFAULT_CYLINDER_N_CIRC = 100
+DEFAULT_CYLINDER_N_LONG = 40
+
+
 @dataclass
 class AdvancedConfig:
     gauss_order: int = 2
@@ -114,15 +118,15 @@ class ParameterSpec:
 # Labels include display units. cut_width is the sole value shown in mm;
 # all Config lengths remain in metres.
 PARAMETERS = (
-    ParameterSpec('cylinder.n_circ', 'mesh', 'Circumferential divisions', 'Divisiones circunferenciales', 40, 'int',
+    ParameterSpec('cylinder.n_circ', 'mesh', 'Circumferential divisions', 'Divisiones circunferenciales', DEFAULT_CYLINDER_N_CIRC, 'int',
                   'Cylinder samples around the bore (8–720). More samples resolve winding shape better but increase memory and solve time.',
                   'Muestras alrededor del cilindro (8–720). Más muestras detallan mejor el trazado y aumentan memoria y tiempo.', 8, 720),
-    ParameterSpec('cylinder.n_long', 'mesh', 'Longitudinal divisions', 'Divisiones longitudinales', 40, 'int',
+    ParameterSpec('cylinder.n_long', 'mesh', 'Longitudinal divisions', 'Divisiones longitudinales', DEFAULT_CYLINDER_N_LONG, 'int',
                   'Cylinder divisions along the bore (2–100). A finer axial mesh adds design freedom and increases solve cost.',
                   'Divisiones a lo largo del cilindro (2–100). Una malla axial fina agrega libertad de diseño y aumenta el costo del cálculo.', 2, 100),
-    ParameterSpec('cylinder.mesh_length_factor', 'mesh', 'Winding length / shell length', 'Largo del bobinado / largo del molde', 0.95, 'float',
-                  'Dimensionless factor, greater than 0 and at most 1. The winding mesh uses this fraction of shell length; 0.95 reserves space at both ends.',
-                  'Factor sin unidades, mayor que 0 y hasta 1. La malla usa esta fracción del largo del molde; 0.95 reserva espacio en ambos extremos.', 0, 1, positive=True),
+    ParameterSpec('cylinder.mesh_length_factor', 'mesh', 'Winding length factor', 'Factor de largo del bobinado', 0.95, 'float',
+                  'Fraction of the entered length used by the centered winding mesh. Use a value greater than 0 and at most 1. In Batch design the factor applies to each gradient length.',
+                  'Fracción del largo ingresado que ocupa la malla de bobinado centrada. Usa un valor mayor que 0 y hasta 1. En Diseño en lote se aplica al largo de cada gradiente.', 0, 1, positive=True),
     ParameterSpec('advanced.iteration_num_mesh_refinement', 'mesh', 'Mesh refinement passes', 'Pasadas de refinamiento', 0, 'int',
                   'Each pass splits each triangle into four (0–3 passes). Memory can rise sharply; the preview shows the selected effective mesh density.',
                   'Cada pasada divide cada triángulo en cuatro (0–3). La memoria puede aumentar mucho; la vista previa muestra la densidad efectiva seleccionada.', 0, 3),

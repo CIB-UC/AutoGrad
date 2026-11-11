@@ -99,6 +99,10 @@ def test_nominal_keys_honor_printing_clearance_and_have_no_antenna_slot(design, 
 def test_complete_set_is_validated_and_published_together(design, include_keys):
     batch, configs, results = design
     batch.include_keys = include_keys
+    radii = {cfg.gradient_axis: cfg.shell_outer_radius for cfg in configs}
+    batch.outer_radii = tuple(radii[axis] for axis in 'xyz')
+    batch.axis_order = ('x', 'y', 'z')
+    configs = build_layer_configs(batch)
     previous = _hashes(results)
     result = assembly.finalize_batch(batch, configs, results)
     assert _hashes(results) == previous
@@ -112,6 +116,8 @@ def test_complete_set_is_validated_and_published_together(design, include_keys):
         mesh = trimesh.load_mesh(path)
         assert mesh.is_watertight and mesh.is_winding_consistent and mesh.volume > 0
         assert mesh.bounds[:, 2] == pytest.approx([-85, 85])
+        if not include_keys:
+            assert np.linalg.norm(mesh.vertices[:, :2], axis=1).max() == pytest.approx(1000 * radii[axis])
         assert len(assembly._solid(mesh, axis).decompose()) == 1
     report = json.loads(Path(result['report_path']).read_text(encoding='utf-8'))
     assert report['status'] == 'complete' and report['antenna_slot'] is False
@@ -180,14 +186,51 @@ def test_round_conductors_do_not_confuse_overlapping_grooves_with_real_cable(des
     groove.apply_scale(1000)
     solid = assembly._solid(groove, 'groove')
     paths = [np.array([[30., 3.*i, -1.], [30., 3.*i, 1.]]) for i in range(3)]
-    roi, _ = assembly._roi_solid(configs[0])
-    checks = assembly._check_conductors(configs, [solid]*3, roi, paths)
+    rois = [assembly._roi_solid(cfg)[0] for cfg in configs]
+    checks = assembly._check_conductors(configs, [solid]*3, rois, paths)
     assert len(checks) == 6
     assert all(check['intersection_mm3'] == 0 for check in checks)
     assert checks[0]['model'] == 'round_wire_segment_capsules'
+    inside_roi = np.array([[5., 0., -1.], [5., 0., 1.]])
+    with pytest.raises(assembly.AssemblyFeasibilityError, match='round conductor / ROI GZ'):
+        assembly._check_conductors(configs, [solid]*3, rois, [inside_roi, *paths[1:]])
     paths[1][:, 1] = .5
     with pytest.raises(RuntimeError, match='round conductor / conductor'):
-        assembly._check_conductors(configs, [solid]*3, roi, paths)
+        assembly._check_conductors(configs, [solid]*3, rois, paths)
+
+
+@pytest.mark.parametrize('interferes', [False, True])
+def test_assembly_checks_other_molds_against_round_cable(design, interferes):
+    from halbach_coils.coilgen.leads import current_path_path
+
+    batch, configs, results = design
+    batch.groove_dimensions = ((.003, .0015),) * 3
+    outer = configs[1]
+    # The subtraction tool hits the neighboring mold regardless of wire position.
+    _conductor([outer.shell_radial_center, 0, 0]).export(_wire(results[0]))
+    for index, (cfg, result) in enumerate(zip(configs, results)):
+        radius = outer.shell_inner_radius - .0005 if index == 0 and interferes else cfg.shell_radial_center
+        wire = _wire(result)
+        np.savez(current_path_path(wire), path=[[radius, 0, -.004], [radius, 0, .004]],
+                 units='m', coordinate_frame='physical_xyz', gradient_axis=cfg.gradient_axis,
+                 b0_direction=cfg.b0_direction, with_leads_sha256=hashlib.sha256(wire.read_bytes()).hexdigest())
+    if interferes:
+        with pytest.raises(assembly.AssemblyFeasibilityError, match='round conductor / other former'):
+            assembly.finalize_batch(batch, configs, results)
+    else:
+        result = assembly.finalize_batch(batch, configs, results)
+        report = json.loads(Path(result['report_path']).read_text(encoding='utf-8'))
+        assert report['mold_and_key_clearance_model'] == 'round_wire_segment_capsules'
+        assert len(result['interfaces']) == 2
+
+
+def test_round_cable_hits_solid_at_a_face_or_when_embedded():
+    mesh = trimesh.creation.box(extents=[10, 10, 10])
+    hits = assembly._round_wire_hits_mesh
+    assert hits(np.array([[-8., 1., 0.], [8., 1., 0.]]), .5, mesh)
+    assert hits(np.array([[0., 0., 0.], [1., 0., 0.]]), .5, mesh)
+    assert hits(np.array([[-8., 5.4, 0.], [8., 5.4, 0.]]), .5, mesh)
+    assert not hits(np.array([[-8., 5.6, 0.], [8., 5.6, 0.]]), .5, mesh)
 
 
 def test_current_path_must_match_conductor_hash_and_coordinates(design):
@@ -216,7 +259,7 @@ def test_terminal_through_another_former_is_rejected(design):
         assembly.finalize_batch(batch, configs, results)
 
 
-def test_actual_conductor_intruding_into_shared_roi_is_rejected(design):
+def test_actual_conductor_intruding_into_own_roi_is_rejected(design):
     batch, configs, results = design
     batch.include_keys = False
     _conductor([.0151, 0, 0], radius=.0003).export(_wire(results[0]))
@@ -416,11 +459,38 @@ def test_disabled_batch_marks_preserve_original_unmarked_geometry(design):
         assert final.volume == pytest.approx(original.volume)
 
 
-def test_roi_union_covers_each_gradient(design):
-    _, configs, _ = design
+@pytest.mark.parametrize('include_keys', [True, False])
+def test_other_gradient_roi_can_overlap_inner_conductors_and_formers(design, include_keys):
+    batch, configs, results = design
+    batch.include_keys = include_keys
+    rois = {'z': (.015,) * 3}
+    for cfg in configs[1:]:
+        radius = cfg.shell_inner_radius - .001
+        assert cfg.estimated_wire_inner_radius < radius
+        rois[cfg.gradient_axis] = (radius,) * 3
+    batch.roi_dimensions = tuple(rois[axis] for axis in 'xyz')
+    configs = build_layer_configs(batch)
+    for index in (1, 2):
+        roi, _ = assembly._roi_solid(configs[index])
+        inner_former, inner_conductor, _ = assembly._load_layer(configs[index-1], results[index-1])
+        assert assembly._intersection_volume(inner_conductor, roi) > 0
+        assert assembly._intersection_volume(inner_former, roi) > 0
+    before = _hashes(results)
+    output = assembly.finalize_batch(batch, configs, results)
+    report = json.loads(Path(output['report_path']).read_text(encoding='utf-8'))
+    assert report['status'] == 'complete'
+    assert report['roi_validation_scope'] == 'own_gradient'
+    assert report['roi_by_gradient_mm']['y'][0] == pytest.approx(configs[2].target.rx * 1000)
+    assert len(output['interfaces']) == (2 if include_keys else 0)
+    assert _hashes(results) == before
+
+
+def test_former_intruding_into_own_roi_is_still_rejected(design):
+    batch, configs, results = design
+    batch.include_keys = False
     configs = deepcopy(configs)
-    configs[1].target.rx = .02
-    union, _ = assembly._roi_union(configs)
-    bounds = assembly.trimesh_from_manifold(union).bounds
-    assert bounds[1, 0] >= 20
-    assert bounds[1, 1] >= 15
+    radius = configs[0].shell_inner_radius + .0005
+    configs[0].target.rx = configs[0].target.ry = configs[0].target.rz = radius
+    with pytest.raises(assembly.AssemblyFeasibilityError, match='former / ROI'):
+        assembly.finalize_batch(batch, configs, results)
+    assert not (Path(batch.output_dir) / 'Conjunto').exists()

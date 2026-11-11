@@ -98,8 +98,8 @@ def test_outer_anchor_preserves_total_radius_with_individual_wall_thicknesses():
         [cfg.shell_outer_radius for cfg in (z, x, y)])
     assert [cfg.wire.conductor_width for cfg in from_inner] == [.002, .0015, .0025]
     assert [cfg.winding.layer_gap_mm for cfg in from_inner] == [.0001, .0002, .0004]
-    batch.anchor_radius = .03
-    with pytest.raises(ValueError, match='ROI must fit'):
+    batch.anchor_radius = .02
+    with pytest.raises(ValueError, match='reference radius is too small'):
         build_layer_configs(batch)
 
 
@@ -112,6 +112,26 @@ def test_nondefault_crossing_shift_uses_actual_derived_wire_envelopes():
     for inner, outer in zip(configs, configs[1:]):
         assert outer.estimated_wire_inner_radius - inner.estimated_wire_outer_radius == pytest.approx(.0003)
         assert outer.shell_inner_radius - inner.shell_outer_radius == pytest.approx(.0063)
+
+
+def test_gradient_lengths_use_longest_selected_shell_and_preserve_the_mesh_margin():
+    batch = _batch(gradient_lengths=(.2, .16, .18), axis_order=('y', 'z'))
+    batch.base.cylinder.mesh_length_factor = .9
+    y, z = build_layer_configs(batch)
+    assert y.cylinder.height == z.cylinder.height == .18
+    assert y.cylinder.height * y.cylinder.mesh_length_factor == pytest.approx(.16 * .9)
+    assert z.cylinder.height * z.cylinder.mesh_length_factor == pytest.approx(.18 * .9)
+    assert batch.base.cylinder.height == .17
+    assert batch.base.cylinder.mesh_length_factor == .9
+
+
+def test_axial_roi_must_fit_the_common_cylinder():
+    batch = _batch(gradient_lengths=(.2, .03, .18))
+    assert len(build_layer_configs(batch)) == 3
+    roi = (.02, .02, .02)
+    batch.roi_dimensions = (roi, (.02, .02, .1), roi)
+    with pytest.raises(ValueError, match='ROI must fit inside the cylinder height'):
+        build_layer_configs(batch)
 
 
 def test_thinner_cable_uses_same_pipeline_wall_but_reserves_real_gradient_gap():
@@ -129,10 +149,18 @@ def test_thinner_cable_uses_same_pipeline_wall_but_reserves_real_gradient_gap():
     ('radius_mode', 'manual', 'Radius mode'),
     ('radial_gap', float('nan'), 'Inter-gradient gap'),
     ('radial_gap', -.0001, 'Inter-gradient gap'),
+    ('outer_radii', (.05, None, .04), 'each selected gradient'),
+    ('outer_radii', (.05, float('inf'), .04), 'Mold outer radius'),
+    ('outer_radii', (.05, .06, .003), 'must exceed its wall thickness'),
+    ('outer_radii', (.05, .053, .04), 'Adjacent mold walls overlap'),
     ('axis_order', ('z', 'z', 'x'), 'without duplicates'),
+    ('gradient_lengths', (.2, .16), 'three gradient lengths'),
+    ('gradient_lengths', (.2, float('nan'), .18), 'Gradient length'),
     ('tikhonov_factors', (1, 2, float('inf')), 'Tikhonov'),
     ('num_levels', (1, 12, 16), 'level count'),
     ('conductor_widths', (.002, 0, .002), 'Wire diameter'),
+    ('groove_dimensions', ((.004, .002),), 'three groove dimensions'),
+    ('groove_dimensions', ((.004, .002), (.004, 0), (.004, .002)), 'Groove width'),
     ('layer_gaps', (0, 0), 'three wire diameters'),
     ('key_length', float('nan'), 'Key axial length'),
     ('fit_clearance', .004, 'smaller than'),
@@ -177,7 +205,7 @@ def _fake_pipeline(calls, *, fail_axis=None, discard_axis=None, stop_axis=None, 
 def test_all_axes_finish_before_single_assembly_finalizer(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr('halbach_coils.run_pipeline.run_pipeline', _fake_pipeline(calls))
-    batch = _batch(tmp_path, include_keys=True)
+    batch = _batch(tmp_path, include_keys=True, gradient_lengths=(.2, .16, .18))
     def finalize(batch_cfg, configs, results):
         assert calls == ['z', 'x', 'y']
         assert len(configs) == len(results) == 3
@@ -190,10 +218,29 @@ def test_all_axes_finish_before_single_assembly_finalizer(tmp_path, monkeypatch)
     assert result.assembly == {'report': 'Ensamble/ensamble.json'}
     document = json.loads(Path(result.manifest_path).read_text(encoding='utf-8'))
     assert document['status'] == 'complete'
+    assert document['height_m'] == .2
+    assert [layer['winding_mesh_height_m'] for layer in document['layers']] == pytest.approx([.171, .19, .152])
     assert all(layer['status'] == 'complete' for layer in document['layers'])
     assert 'Estado: complete' in Path(result.summary_path).read_text(encoding='utf-8')
     # Source config can be reused and still points to its original output dir.
     assert batch.base.output_dir == ''
+
+
+def test_explicit_radii_sort_pipelines_and_report_each_mold_gap(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr('halbach_coils.run_pipeline.run_pipeline', _fake_pipeline(calls))
+    batch = _batch(tmp_path, outer_radii=(.05, .038, .065))
+    result = _run_batch(batch)
+    assert result.completed and calls == ['y', 'x', 'z']
+    assert batch.axis_order == ('z', 'x', 'y')
+    document = json.loads(Path(result.manifest_path).read_text(encoding='utf-8'))
+    assert document['radius_mode'] == 'per_gradient'
+    assert 'anchor_radius_m' not in document and 'radial_gap_m' not in document
+    assert [row['shell_outer_radius_m'] for row in document['layers']] == [.038, .05, .065]
+    assert [(pair['inner_axis'], pair['outer_axis']) for pair in document['mold_gaps']] == [('y', 'x'), ('x', 'z')]
+    assert [pair['gap_m'] for pair in document['mold_gaps']] == pytest.approx([.008, .011])
+    summary = Path(result.summary_path).read_text(encoding='utf-8')
+    assert 'Separación entre moldes GY → GX: 8 mm' in summary
 
 
 def test_batch_defers_marks_to_joint_assembly_and_saves_checkbox(tmp_path, monkeypatch):

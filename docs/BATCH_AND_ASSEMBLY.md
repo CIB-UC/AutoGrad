@@ -13,26 +13,25 @@ FastHenry and molds.
 
 ## Dimensions
 
-Enter one anchor radius: either the innermost complete gradient's inner radius
-or the outermost complete gradient's outer radius, including cable and grooves.
-Switching modes initially preserves geometry; the anchor can then be edited.
+Enter the outer plastic radius of each selected mold, as in Pipeline. The
+application sorts the molds by radius and calculates each gap as the outer
+mold's inner radius minus the inner mold's outer radius.
 
-Each axis has cable diameter, crossing-layer gap, Tikhonov factor and level count.
-Shared A/B factors scale cable diameter into radial groove height and tangential
-groove width. Mold wall thickness follows the individual Pipeline formula:
+Each axis has an axial length, real cable diameter, radial groove height and
+tangential groove width in millimetres. The longest selected length sets all
+mold heights. Each winding mesh is centered at Z = 0. Cable diameter sets the
+electrical cross-section and conductor clearance. Groove dimensions define the
+cut into the mold. Mold wall thickness follows the individual Pipeline formula:
 
 `wall = 2 × radial_groove_height + layer_gap − 2 × radial_trim`
 
 `radial_trim = trim_fraction × radial_groove_height`
 
-The inter-gradient gap is `outer_gradient_inner_radius − inner_gradient_outer_radius`
-using complete envelopes, including exposed cable. Plastic radii are displayed
-separately. Exposed cable contributes to gradient thickness rather than consuming
-the requested gap. Zero gap is allowed as theoretical contact; negative values
-are rejected. Final CAD checks still evaluate discretized conductors, leads and
-keys in three dimensions.
+The preview shows the mold radii and the complete radial envelopes, including
+exposed cable. The mold walls can touch at a nominal zero gap. Final CAD checks
+evaluate conductors, leads and keys in three dimensions.
 
-Starting values: height 170 mm, innermost complete radius 26.5 mm, cable 2 mm,
+Historical starting values used height 170 mm, innermost complete radius 26.5 mm, cable 2 mm,
 A=2/B=1, zero crossing-layer gap and 0.3 mm inter-gradient gap. Complete inner/outer
 radii are Gz 26.5/34.5, Gx 34.8/42.8 and Gy 43.1/51.1 mm. Plastic radii are
 28.5/32.5, 36.8/40.8 and 45.1/49.1 mm. Initial Tikhonov 2500 and 12 levels per
@@ -60,7 +59,9 @@ The stop limits +Z travel; keys prevent relative rotation; withdrawal towards
 −Z remains possible. No snap latch or two-direction axial retention is added.
 
 Before publishing assembly outputs, checks cover conductor/conductor,
-conductor/other-mold, mold/mold and the shared ROI. Serialized STLs are reloaded
+conductor/other-mold, mold/mold and each gradient's own ROI. A gradient's ROI
+may overlap another gradient's conductor or mold; the ROIs are independent
+field targets, not a shared keepout volume. Serialized STLs are reloaded
 and checked for closure, orientation, one connected body and interference.
 CAD stays in double precision until export. The key report records intersection
 tolerance. CAD uses a conservative circumscribed ROI ellipsoid; electromagnetic

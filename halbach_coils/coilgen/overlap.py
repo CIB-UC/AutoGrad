@@ -303,7 +303,7 @@ def detect_collisions(solution, cfg: Config) -> OverlapReport:
     merge_distance = 1.5 * tolerance
     sites: list[CollisionSite] = []
     layer_shift = abs(float(cfg.normal_shift_length))
-    required_separation = float(cfg.cable_height)
+    required_separation = float(cfg.wire.conductor_width)
 
     for part_index, part in enumerate(getattr(solution, 'coil_parts', [])):
         wire_path = getattr(part, 'wire_path', None)

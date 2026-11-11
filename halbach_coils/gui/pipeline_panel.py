@@ -492,8 +492,7 @@ class PipelinePanel(ttk.Frame):
             raise ValueError(self.root.tr(
                 "Cable and groove dimensions must be positive."))
         cfg.wire.conductor_width = diameter
-        cfg.wire.cross_section_a_frac = groove_height / diameter
-        cfg.wire.cross_section_b_frac = groove_width / diameter
+        cfg.wire.set_groove_dimensions(groove_height, groove_width)
 
     def _toggle_roi(self):
         """Show single R or independent Rx/Ry/Rz according to the checkbox."""

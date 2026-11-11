@@ -13,16 +13,16 @@ def fill_gui_design():
         cfg.shell.b0_marker = True
         app.pipeline_panel.apply_config(cfg)
         batch = app.batch_panel
-        for name, value in {'height_var':'170', 'anchor_radius_var':'26.5',
-                            'radial_gap_var':'.3', 'a_var':'2', 'b_var':'1',
-                            'key_length_var':'4', 'key_width_var':'4',
+        for axis, radius in zip('xyz', ('40.8', '49.1', '32.5')):
+            batch.outer_radius_vars[axis].set(radius)
+        for name, value in {'key_length_var':'4', 'key_width_var':'4',
                             'fit_clearance_var':'.3'}.items():
             getattr(batch, name).set(value)
         batch.material_var.set('Cu')
         batch._on_material_changed()
         for var in (var for dimensions in batch.roi_vars.values() for var in dimensions.values()):
             var.set('20')
-        for group, value in ((batch.cable_vars,'2'), (batch.layer_gap_vars,'0'),
+        for group, value in ((batch.length_vars,'170'), (batch.cable_vars,'2'), (batch.layer_gap_vars,'0'),
                              (batch.tikhonov_vars,'2500'), (batch.levels_vars,'12')):
             for var in group.values():
                 var.set(value)

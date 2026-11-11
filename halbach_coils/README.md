@@ -49,15 +49,12 @@ the publication branch and are not required by the application or its tests.
   Clear a stage checkbox only when deliberately reusing compatible intermediate
   files. A reused wire requires its matching design JSON, field data and lead
   references; the application verifies their configuration and hashes.
-- **Batch design** runs the selected gradients in a common physical frame. The initial
-  nesting order is Gz → Gx → Gy. Choose the inner radius of the innermost
-  complete gradient or the outer radius of the outermost one, a shared height
-  and ROI, and the radial gap between complete gradients. These envelopes
-  include exposed cable and grooves; plastic radii are displayed separately.
-  Each Gx/Gy/Gz row has an inclusion checkbox. Uncheck a gradient to generate
-  only the selected axes; at least one must remain selected. The preview,
-  radii, radial gaps and assembly keys are recalculated for the selected set,
-  retaining its inside-to-outside order. Excluded gradients produce no output.
+- **Batch design** runs the selected gradients in a common physical frame. Set
+  each mold's outer radius in millimetres, as in Pipeline. The selected radii
+  determine the nesting order and the preview shows the gap between adjacent
+  molds. Each gradient has its own winding length and ROI. The longest selected
+  winding length sets the common mold height. Select at least one axis using the
+  Gx, Gy and Gz checkboxes.
   Enable **Generate gradients simultaneously (one process each)** to run each
   selected gradient in a separate process. Final assembly waits for all selected axes;
   the default runs the gradients sequentially. Windows FastHenry calculations

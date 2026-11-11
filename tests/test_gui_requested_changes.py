@@ -95,11 +95,12 @@ def test_advanced_reset_is_limited_to_advanced_parameters():
     updates = []
     controls = AdvancedControls(root, cfg, on_change=lambda: updates.append(True))
     controls.variables['cylinder.n_circ'].set('400')
+    controls.variables['cylinder.n_long'].set('35')
     controls.variables['winding.cut_width'].set('invalid')
     controls.variables['advanced.gauss_order'].set('7')
     controls.reset_button.invoke()
     controls.apply_to(cfg)
-    assert (cfg.cylinder.n_circ, cfg.cylinder.n_long) == (40, 40)
+    assert (cfg.cylinder.n_circ, cfg.cylinder.n_long) == (100, 40)
     assert cfg.winding.cut_width == .001
     assert cfg.advanced.gauss_order == 2
     assert cfg.cylinder.radius == .15 and cfg.target.rx == .07

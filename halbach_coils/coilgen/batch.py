@@ -1,7 +1,7 @@
 """Selected concentric gradient designs using sequential or parallel pipelines.
 
-Lengths use metres. One anchor radius and the gap between complete gradient
-envelopes define the selected concentric layers. Each envelope contains both the
+Lengths use metres. Explicit mold outer radii set the selected concentric
+layers. Legacy configurations use an anchor radius and an envelope gap. Each envelope contains both the
 former and the cable/groove, including crossings. Former wall thicknesses use
 the existing pipeline formula. Per-axis tuples always use X, Y, Z order.
 ``axis_order`` selects the axes and their inside-to-outside order. Complete wire envelopes are
@@ -49,6 +49,9 @@ class BatchConfig:
     shift_smooth_factors: tuple[tuple[int, int, int], ...] | None = None
     parallel_gradients: bool = False
     roi_dimensions: tuple[tuple[float, float, float] | None, ...] | None = None
+    gradient_lengths: tuple[float, float, float] | None = None  # nominal axial lengths in X, Y, Z order
+    groove_dimensions: tuple[tuple[float, float] | None, ...] | None = None  # (radial height, tangential width) per axis
+    outer_radii: tuple[float | None, float | None, float | None] | None = None  # mold outer radii in X, Y, Z order
 
 
 @dataclass(frozen=True)
@@ -70,29 +73,41 @@ def _positive(value, name, *, allow_zero=False) -> float:
     return number
 
 
-def gradient_radial_bounds(cfg: Config) -> tuple[float, float]:
-    """Complete radial extent, including the parts outside the plastic former."""
+def _round_wire_radial_bounds(cfg: Config) -> tuple[float, float]:
     centers = (cfg.cylinder_design_radius,
                cfg.cylinder_design_radius + cfg.normal_shift_length)
     wire_radius = cfg.wire.conductor_width / 2
-    return (min(cfg.shell_inner_radius, cfg.estimated_wire_inner_radius, min(centers)-wire_radius),
-            max(cfg.shell_outer_radius, cfg.estimated_wire_outer_radius, max(centers)+wire_radius))
+    return min(centers) - wire_radius, max(centers) + wire_radius
+
+
+def gradient_radial_bounds(cfg: Config) -> tuple[float, float]:
+    """Complete radial extent, including the parts outside the plastic former."""
+    wire_inner, wire_outer = _round_wire_radial_bounds(cfg)
+    return (min(cfg.shell_inner_radius, cfg.estimated_wire_inner_radius, wire_inner),
+            max(cfg.shell_outer_radius, cfg.estimated_wire_outer_radius, wire_outer))
+
+
+def mold_radial_gap(inner: Config, outer: Config) -> float:
+    return outer.shell_inner_radius - inner.shell_outer_radius
 
 
 def build_layer_configs(batch: BatchConfig) -> tuple[Config, ...]:
     """Validate and derive each layer without changing the shared input Config.
 
-    ``radius_mode='inner'`` fixes the innermost complete gradient's inner
+    ``outer_radii`` fixes the plastic outer radii and determines the order.
+    For legacy input, ``radius_mode='inner'`` fixes the innermost complete gradient's inner
     radius; ``outer`` fixes the outermost complete gradient's outer radius.
     ``radial_gap = Rinner(next gradient) - Router(previous gradient)``.
     The plastic faces are derived separately; exposed cable must not consume
     the gap requested by the user. Final CAD still checks actual leads/keys.
     """
     base = batch.base
-    anchor_radius = _positive(batch.anchor_radius, 'Anchor radius')
-    gap = _positive(batch.radial_gap, 'Inter-gradient gap', allow_zero=True)
-    if batch.radius_mode not in ('inner', 'outer'):
-        raise ValueError('Radius mode must be inner or outer.')
+    radii = batch.outer_radii
+    if radii is None:
+        anchor_radius = _positive(batch.anchor_radius, 'Anchor radius')
+        gap = _positive(batch.radial_gap, 'Inter-gradient gap', allow_zero=True)
+        if batch.radius_mode not in ('inner', 'outer'):
+            raise ValueError('Radius mode must be inner or outer.')
     key_length = _positive(batch.key_length, 'Key axial length')
     key_width = _positive(batch.key_width, 'Key tangential width')
     fit_clearance = _positive(batch.fit_clearance, 'Key fit clearance')
@@ -101,6 +116,12 @@ def build_layer_configs(batch: BatchConfig) -> tuple[Config, ...]:
     order = tuple(str(axis).lower() for axis in batch.axis_order)
     if not order or len(set(order)) != len(order) or not set(order) <= {'x', 'y', 'z'}:
         raise ValueError('Select at least one gradient (X, Y or Z), without duplicates.')
+    if radii is not None:
+        if len(radii) != 3 or any(radii['xyz'.index(axis)] is None for axis in order):
+            raise ValueError('Supply an outer mold radius for each selected gradient.')
+        radii_by_axis = {axis: _positive(radius, 'Mold outer radius')
+                         for axis, radius in zip('xyz', radii) if axis in order}
+        order = tuple(sorted(order, key=radii_by_axis.__getitem__))
     if base.shell.use_custom_stl:
         raise ValueError('Batch design requires generated cylindrical shells, not custom STL shells.')
     if not np.allclose(base.rotated_cylinder_axis, (0, 0, 1), atol=1e-10):
@@ -108,10 +129,22 @@ def build_layer_configs(batch: BatchConfig) -> tuple[Config, ...]:
     if not all((base.control.run_gradient, base.control.run_leads, base.control.run_shell)):
         raise ValueError('Batch design must run gradient, leads and shell for all selected axes.')
     _positive(base.wire.conductor_width, 'Wire diameter')
-    _positive(base.conductor_semi_a, 'Groove radial semi-axis')
-    _positive(base.conductor_semi_b, 'Groove tangential semi-axis')
-    _positive(base.cylinder.height, 'Cylinder height')
-    if not 0 < float(base.cylinder.mesh_length_factor) <= 1:
+    grooves = batch.groove_dimensions
+    if grooves is None:
+        _positive(base.conductor_semi_a, 'Groove radial semi-axis')
+        _positive(base.conductor_semi_b, 'Groove tangential semi-axis')
+    elif len(grooves) != 3:
+        raise ValueError('Supply three groove dimensions in X, Y, Z order.')
+    lengths = batch.gradient_lengths
+    if lengths is None:
+        lengths = (_positive(base.cylinder.height, 'Cylinder height'),) * 3
+    if len(lengths) != 3:
+        raise ValueError('Supply three gradient lengths in X, Y, Z order.')
+    selected_lengths = {axis: _positive(length, 'Gradient length')
+                        for axis, length in zip('xyz', lengths) if axis in order}
+    shell_height = max(selected_lengths.values())
+    mesh_factor = float(base.cylinder.mesh_length_factor)
+    if not 0 < mesh_factor <= 1:
         raise ValueError('The winding length factor must lie between zero and one.')
     default_roi = (base.target.rx, base.target.ry, base.target.rz)
     rois = batch.roi_dimensions if batch.roi_dimensions is not None else (default_roi,) * 3
@@ -123,7 +156,7 @@ def build_layer_configs(batch: BatchConfig) -> tuple[Config, ...]:
         if roi is None or len(roi) != 3:
             raise ValueError('Each selected gradient requires three ROI semi-axes.')
         roi = tuple(_positive(value, 'ROI semi-axis') for value in roi)
-        if roi[2] >= base.cylinder.height / 2:
+        if roi[2] >= shell_height / 2:
             raise ValueError('The ROI must fit inside the cylinder height.')
         selected_rois[axis] = roi
 
@@ -168,12 +201,21 @@ def build_layer_configs(batch: BatchConfig) -> tuple[Config, ...]:
         # Choose one clear B0 side jointly after all selected shells are available.
         cfg.shell.b0_marker = False
         cfg.gradient_axis = axis
+        cfg.cylinder.height = shell_height
+        # The winding mesh is centered at Z=0 and uses height times this factor.
+        cfg.cylinder.mesh_length_factor = mesh_factor * (selected_lengths[axis] / shell_height)
         cfg.target.rx, cfg.target.ry, cfg.target.rz = selected_rois[axis]
         cfg.leads.preset = deepcopy(preset_for(axis))
         axis_index = 'xyz'.index(axis)
         cfg.tikhonov_factor = factors[axis_index]
         cfg.num_levels = int(levels[axis_index])
         cfg.wire.conductor_width = widths[axis_index]
+        if grooves is not None:
+            groove = grooves[axis_index]
+            if groove is None or len(groove) != 2:
+                raise ValueError('Each selected gradient requires a groove height and width.')
+            cfg.wire.set_groove_dimensions(_positive(groove[0], 'Groove height'),
+                                           _positive(groove[1], 'Groove width'))
         cfg.winding.layer_gap_mm = layer_gaps[axis_index]
         cfg.winding.cut_width = cut_widths[axis_index]
         cfg.winding.normal_shift_smooth = list(smooth_factors[axis_index])
@@ -182,6 +224,14 @@ def build_layer_configs(batch: BatchConfig) -> tuple[Config, ...]:
                           if batch.output_dir else '')
         cfg.show_plots = False
         configs.append(cfg)
+    if radii is not None:
+        for cfg in configs:
+            cfg.cylinder.radius = radii_by_axis[cfg.gradient_axis]
+            if cfg.shell_inner_radius <= 0:
+                raise ValueError('Each mold outer radius must exceed its wall thickness.')
+        if any(mold_radial_gap(inner, outer) < -1e-10 for inner, outer in zip(configs, configs[1:])):
+            raise ValueError('Adjacent mold walls overlap. Adjust the outer radii or the wall dimensions.')
+        return tuple(configs)
     # All radius-derived geometry translates linearly with cylinder.radius.
     # Work out each layer's full width before placing any layer, so both
     # anchor modes and different cable sizes use exactly the same gap.
@@ -193,25 +243,31 @@ def build_layer_configs(batch: BatchConfig) -> tuple[Config, ...]:
               for cfg, (low, high) in zip(configs, extents)]
     inner_radius = (anchor_radius if batch.radius_mode == 'inner' else
                     anchor_radius - sum(widths) - (len(configs) - 1) * gap)
+    if inner_radius <= 0:
+        raise ValueError('The reference radius is too small for the selected gradients and gaps.')
     next_inner = inner_radius
+    # The nominal envelopes position the layers. Assembly checks each ROI
+    # against the actual cable and mold of its own layer.
     for cfg, (protrudes_in, protrudes_out) in zip(configs, extents):
-        if next_inner <= max(cfg.target.rx, cfg.target.ry):
-            raise ValueError(f'{cfg.axis_label} ROI must fit inside its gradient; increase the anchor radius or reduce the ROI.')
         cfg.cylinder.radius = next_inner + protrudes_in + cfg.shell_wall_thickness
         next_inner = cfg.shell_outer_radius + protrudes_out + gap
     return tuple(configs)
 
 
 def _layer_record(cfg: Config, index: int) -> dict:
+    wire_inner, wire_outer = _round_wire_radial_bounds(cfg)
     return {
         'layer': index + 1,
         'axis': cfg.gradient_axis,
+        'winding_mesh_height_m': cfg.cylinder.height * cfg.cylinder.mesh_length_factor,
         'roi_semi_axes_m': [cfg.target.rx, cfg.target.ry, cfg.target.rz],
         'status': 'pending',
         'directory': f'{index + 1:02d}_G{cfg.gradient_axis}',
         'tikhonov_factor': cfg.tikhonov_factor,
         'num_levels': cfg.num_levels,
         'conductor_width_m': cfg.wire.conductor_width,
+        'groove_radial_height_m': cfg.groove_radial_height,
+        'groove_tangential_width_m': cfg.groove_tangential_width,
         'layer_crossing_gap_m': cfg.winding.layer_gap_mm,
         'interconnection_cut_width_m': cfg.winding.cut_width,
         'normal_shift_smooth_factors': list(cfg.winding.normal_shift_smooth),
@@ -221,8 +277,8 @@ def _layer_record(cfg: Config, index: int) -> dict:
         'gradient_outer_radius_m': gradient_radial_bounds(cfg)[1],
         'shell_inner_radius_m': cfg.shell_inner_radius,
         'shell_outer_radius_m': cfg.shell_outer_radius,
-        'wire_inner_radius_m': cfg.estimated_wire_inner_radius,
-        'wire_outer_radius_m': cfg.estimated_wire_outer_radius,
+        'wire_inner_radius_m': wire_inner,
+        'wire_outer_radius_m': wire_outer,
     }
 
 
@@ -262,19 +318,26 @@ def _spanish_report_lines(document):
         f"B0 compartido: {document['b0_direction'].upper()}",
         'Marcas B0 en los moldes seleccionados: ' +
         ('activadas' if document.get('include_b0_markers') else 'desactivadas'),
-        f"Radio ancla {'del gradiente completo' if complete_gap else 'del molde'} ({document['radius_mode']}): {document['anchor_radius_m'] * 1000:.6g} mm",
         f"Radio interior del molde: {document['shell_inner_radius_m'] * 1000:.6g} mm",
         f"Radio exterior del molde: {document['shell_outer_radius_m'] * 1000:.6g} mm",
         f"Radio interior del cable estimado: {document['wire_inner_radius_m'] * 1000:.6g} mm",
-        f"Gap radial {'entre gradientes completos' if complete_gap else 'entre cuerpos de moldes'}: {document['radial_gap_m'] * 1000:.6g} mm",
-        ('Gap = Rint del gradiente exterior - Rext del gradiente interior, incluyendo cable y ranuras.'
-         if complete_gap else 'Formato anterior: el gap no incluía las partes de cable fuera del molde.'),
         'Las caras de plástico del molde se indican por separado.',
-        '',
     ]
+    if 'anchor_radius_m' in document:
+        lines.extend([
+            f"Radio ancla {'del gradiente completo' if complete_gap else 'del molde'} ({document['radius_mode']}): {document['anchor_radius_m'] * 1000:.6g} mm",
+            f"Gap radial {'entre gradientes completos' if complete_gap else 'entre cuerpos de moldes'}: {document['radial_gap_m'] * 1000:.6g} mm",
+            ('Gap = Rint del gradiente exterior - Rext del gradiente interior, incluyendo cable y ranuras.'
+             if complete_gap else 'Formato anterior: el gap no incluía las partes de cable fuera del molde.'),
+        ])
+    for pair in document.get('mold_gaps', ()):
+        lines.append(f"Separación entre moldes G{pair['inner_axis'].upper()} → G{pair['outer_axis'].upper()}: "
+                     f"{pair['gap_m'] * 1000:.6g} mm")
+    if 'height_m' in document:
+        lines.append(f"Largo común de los moldes: {document['height_m'] * 1000:.6g} mm")
+    lines.append('')
     if document.get('requires_interference_check'):
-        lines.extend(['Las envolventes radiales de cable coinciden o se acercan a la ROI.',
-                      'Se debe comprobar la separación 3D real antes de completar el ensamble.', ''])
+        lines.extend(['La separación 3D real se comprueba antes de completar el ensamble.', ''])
     for layer in document['layers']:
         gradient_inner = layer.get('gradient_inner_radius_m', min(layer['shell_inner_radius_m'], layer['wire_inner_radius_m']))
         gradient_outer = layer.get('gradient_outer_radius_m', max(layer['shell_outer_radius_m'], layer['wire_outer_radius_m']))
@@ -292,6 +355,11 @@ def _spanish_report_lines(document):
             f"pared: {layer['shell_wall_thickness_m'] * 1000:.6g} mm",
             '  Consultar Resumen.txt de esa capa para campo, resistencia e inductancia.',
         ])
+        if 'winding_mesh_height_m' in layer:
+            lines.append(f"  Largo de la malla de bobinado: {layer['winding_mesh_height_m'] * 1000:.6g} mm")
+        if 'groove_radial_height_m' in layer:
+            lines.append(f"  Altura × ancho de la ranura: {layer['groove_radial_height_m'] * 1000:.6g} × "
+                         f"{layer['groove_tangential_width_m'] * 1000:.6g} mm")
         if layer.get('error'):
             lines.append('  Motivo: ' + layer['error'])
     if document.get('assembly'):
@@ -325,13 +393,22 @@ def _english_report_lines(document):
         'Inside-to-outside order: ' + ' → '.join('G' + item['axis'].upper() for item in document['layers']),
         'Shared B0: ' + document['b0_direction'].upper(),
         'B0 marks: ' + ('enabled' if document.get('include_b0_markers') else 'disabled'),
-        f"Anchor radius ({document['radius_mode']}): {document['anchor_radius_m'] * 1000:.6g} mm",
         f"Mold inner / outer radius: {document['shell_inner_radius_m'] * 1000:.6g} / {document['shell_outer_radius_m'] * 1000:.6g} mm",
         f"Estimated wire inner radius: {document['wire_inner_radius_m'] * 1000:.6g} mm",
-        f"Radial gap: {document['radial_gap_m'] * 1000:.6g} mm",
-        'The gap separates complete gradient envelopes, including cable and grooves.',
-        'Plastic mold radii are reported separately.', '',
+        'Plastic mold radii are reported separately.',
     ]
+    if 'anchor_radius_m' in document:
+        lines.extend([
+            f"Anchor radius ({document['radius_mode']}): {document['anchor_radius_m'] * 1000:.6g} mm",
+            f"Radial gap: {document['radial_gap_m'] * 1000:.6g} mm",
+            'The gap separates complete gradient envelopes, including cable and grooves.',
+        ])
+    for pair in document.get('mold_gaps', ()):
+        lines.append(f"Mold gap G{pair['inner_axis'].upper()} → G{pair['outer_axis'].upper()}: "
+                     f"{pair['gap_m'] * 1000:.6g} mm")
+    if 'height_m' in document:
+        lines.append(f"Shared mold length: {document['height_m'] * 1000:.6g} mm")
+    lines.append('')
     if document.get('requires_interference_check'):
         lines.extend(['Real 3D clearance must be checked before completing the assembly.', ''])
     for layer in document['layers']:
@@ -346,6 +423,11 @@ def _english_report_lines(document):
             f"  Cable: {layer['conductor_width_m'] * 1000:.6g} mm; crossing gap: {layer['layer_crossing_gap_m'] * 1000:.6g} mm; wall: {layer['shell_wall_thickness_m'] * 1000:.6g} mm",
             '  See the layer Summary.txt for final field, resistance and inductance.',
         ])
+        if 'winding_mesh_height_m' in layer:
+            lines.append(f"  Winding mesh length: {layer['winding_mesh_height_m'] * 1000:.6g} mm")
+        if 'groove_radial_height_m' in layer:
+            lines.append(f"  Groove height × width: {layer['groove_radial_height_m'] * 1000:.6g} × "
+                         f"{layer['groove_tangential_width_m'] * 1000:.6g} mm")
         if layer.get('error'): lines.append('  Reason: ' + layer['error'])
     if document.get('assembly'):
         lines.extend(['', 'VALIDATED ASSEMBLY',
@@ -390,25 +472,22 @@ def run_batch(batch: BatchConfig, should_stop=None, ask_user=None,
     working_batch = deepcopy(batch)
     working_batch.output_dir = str(root)
     configs = build_layer_configs(working_batch)
+    wire_bounds = [_round_wire_radial_bounds(cfg) for cfg in configs]
     document = {
         'format_version': 2,
         'output_language': batch.base.output_language,
         'coordinate_frame': 'physical_xyz',
         'status': 'running',
         'b0_direction': configs[0].b0_direction,
-        'anchor_radius_m': float(batch.anchor_radius),
-        'radius_mode': batch.radius_mode,
         'shell_inner_radius_m': configs[0].shell_inner_radius,
         'shell_outer_radius_m': configs[-1].shell_outer_radius,
-        'gradient_inner_radius_m': gradient_radial_bounds(configs[0])[0],
-        'gradient_outer_radius_m': gradient_radial_bounds(configs[-1])[1],
-        'wire_inner_radius_m': configs[0].estimated_wire_inner_radius,
-        'radial_gap_m': float(batch.radial_gap),
-        'radial_gap_definition': 'complete_gradient_envelopes_including_cable_and_groove',
+        'gradient_inner_radius_m': min(gradient_radial_bounds(cfg)[0] for cfg in configs),
+        'gradient_outer_radius_m': max(gradient_radial_bounds(cfg)[1] for cfg in configs),
+        'wire_inner_radius_m': min(inner for inner, _ in wire_bounds),
         'requires_interference_check': (
-            configs[0].estimated_wire_inner_radius <= max(max(cfg.target.rx, cfg.target.ry) for cfg in configs)
-            or any(right.estimated_wire_inner_radius < left.estimated_wire_outer_radius
-                   for left, right in zip(configs, configs[1:]))),
+            any(min(inner, cfg.shell_inner_radius) <= max(cfg.target.rx, cfg.target.ry)
+                for cfg, (inner, _) in zip(configs, wire_bounds))
+            or any(right[0] < left[1] for left, right in zip(wire_bounds, wire_bounds[1:]))),
         'roi_m': [configs[0].target.rx, configs[0].target.ry, configs[0].target.rz],
         'roi_by_gradient_m': {cfg.gradient_axis: [cfg.target.rx, cfg.target.ry, cfg.target.rz]
                               for cfg in configs},
@@ -422,6 +501,17 @@ def run_batch(batch: BatchConfig, should_stop=None, ask_user=None,
         'fit_clearance_m': float(batch.fit_clearance),
         'layers': [_layer_record(cfg, index) for index, cfg in enumerate(configs)],
     }
+    if batch.outer_radii is None:
+        document.update(anchor_radius_m=float(batch.anchor_radius), radius_mode=batch.radius_mode,
+                        radial_gap_m=float(batch.radial_gap),
+                        radial_gap_definition='complete_gradient_envelopes_including_cable_and_groove')
+    else:
+        document['radius_mode'] = 'per_gradient'
+        document['mold_gaps'] = [
+            {'inner_axis': inner.gradient_axis, 'outer_axis': outer.gradient_axis,
+             'gap_m': max(0.0, mold_radial_gap(inner, outer))}
+            for inner, outer in zip(configs, configs[1:])
+        ]
     summary, manifest = _write_report(root, document)
     results = {}
     assembly = None

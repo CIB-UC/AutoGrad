@@ -105,8 +105,7 @@ def run_gradient(
 
     # ----- arg dict --------------------------------------------------------
     cyl = cfg.cylinder
-    # Shell length = cylinder.height (GUI). Wire mesh = height × 0.95 for
-    # every gradient axis (x/y/z) so grooves stay clear of the rim.
+    # The factor maps the full shell length to this gradient's winding length.
     mesh_height = float(cyl.height) * float(cyl.mesh_length_factor)
     cylinder_mesh_parameter_list = [
         mesh_height, cfg.cylinder_design_radius,

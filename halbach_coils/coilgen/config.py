@@ -28,7 +28,7 @@ import numpy as np
 
 from . import geometry as geo
 from . import paths as _paths
-from .advanced import AdvancedConfig
+from .advanced import AdvancedConfig, DEFAULT_CYLINDER_N_CIRC, DEFAULT_CYLINDER_N_LONG
 
 
 # Electrical resistivity at approximately 20 °C [ohm.m].  pyCoilGen's
@@ -100,6 +100,11 @@ class WireConfig:
     cross_section_a_frac: float = 2.0
     cross_section_b_frac: float = 1.0
 
+    def set_groove_dimensions(self, radial_height: float, tangential_width: float) -> None:
+        """Store the groove dimensions in metres as factors of the cable diameter."""
+        self.cross_section_a_frac = radial_height / self.conductor_width
+        self.cross_section_b_frac = tangential_width / self.conductor_width
+
 
 @dataclass
 class TargetConfig:
@@ -114,8 +119,8 @@ class TargetConfig:
 class CylinderConfig:
     height: float = 0.430                      # [m] requested shell / cylinder length
     radius: float = 0.039                      # [m] physical outer radius
-    n_circ: int = 100
-    n_long: int = 20
+    n_circ: int = DEFAULT_CYLINDER_N_CIRC
+    n_long: int = DEFAULT_CYLINDER_N_LONG
     rot_axis: tuple = (0, 1, 0)
     rot_angle: float = 0.0
     # pyCoilGen mesh axial length = height * this (< 1 keeps windings short of

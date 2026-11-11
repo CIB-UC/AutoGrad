@@ -57,38 +57,50 @@ class BatchPanel(ttk.Frame):
         left.bind('<Configure>', lambda _e: canvas.configure(scrollregion=canvas.bbox('all')))
         canvas.bind('<Configure>', lambda e: canvas.itemconfigure(window, width=e.width))
 
+        dimensions = ttk.LabelFrame(left, text='Gradient dimensions [mm]', padding=8)
+        dimensions.pack(fill='x', pady=(0, 4))
+        self.length_vars = {}
+        self.outer_radius_vars = {}
+        self.cable_vars = {}
+        self.groove_height_vars = {}
+        self.groove_width_vars = {}
+        self._dimension_entries = {axis: [] for axis in 'xyz'}
+        for col, axis in enumerate('xyz', 1):
+            ttk.Label(dimensions, text='G' + axis.upper()).grid(row=0, column=col)
+        dimension_fields = (
+            ('Length', self.length_vars, ('200',) * 3),
+            ('Mold outer radius', self.outer_radius_vars, ('64.3', '72.6', '56')),
+            ('Real cable diameter', self.cable_vars, ('2',) * 3),
+            ('Groove height', self.groove_height_vars, ('4',) * 3),
+            ('Groove width', self.groove_width_vars, ('2',) * 3),
+        )
+        for row, (label, variables, defaults) in enumerate(dimension_fields, 1):
+            ttk.Label(dimensions, text=label).grid(row=row, column=0, sticky='w', padx=(0, 8))
+            for col, axis in enumerate('xyz', 1):
+                var = variables[axis] = tk.StringVar(self, value=defaults[col - 1])
+                entry = ttk.Entry(dimensions, textvariable=var, width=7)
+                entry.grid(row=row, column=col, padx=3, pady=2)
+                self._dimension_entries[axis].append(entry)
+
         shared = ttk.LabelFrame(left, text='Shared dimensions', padding=8)
         shared.pack(fill='x', pady=(0, 4))
         shared.columnconfigure(1, weight=1)
-        self.height_var = self._entry(shared, 0, 'Height [mm]:', '200')
-        radius_modes = ttk.Frame(shared)
-        radius_modes.grid(row=1, column=0, columnspan=2, sticky='w', pady=4)
-        self.radius_mode_var = tk.StringVar(self, value='inner')
-        self._radius_mode = 'inner'
-        ttk.Radiobutton(radius_modes, text='Inner gradient radius', variable=self.radius_mode_var,
-                        value='inner').pack(side='left')
-        ttk.Radiobutton(radius_modes, text='Outer gradient radius', variable=self.radius_mode_var,
-                        value='outer').pack(side='left', padx=8)
-        self.anchor_radius_var = self._entry(shared, 2, 'Reference radius [mm]:', '50')
-        self.radial_gap_var = self._entry(shared, 3, 'Gap between gradients [mm]:', '0.3')
-        self.a_var = self._entry(shared, 7, 'Groove deformation A:', '2')
-        self.b_var = self._entry(shared, 8, 'Groove deformation B:', '1')
-        ttk.Label(shared, text='Conductor material:').grid(row=9, column=0, sticky='w', pady=3)
+        ttk.Label(shared, text='Conductor material:').grid(row=0, column=0, sticky='w', pady=3)
         self.material_var = tk.StringVar(self, value='Cu')
         material = ttk.Combobox(shared, textvariable=self.material_var,
                                 values=[*CONDUCTOR_MATERIAL_RESISTIVITY, 'Custom'],
                                 state='readonly', width=13)
-        material.grid(row=9, column=1, sticky='e')
+        material.grid(row=0, column=1, sticky='e')
         material.bind('<<ComboboxSelected>>', self._on_material_changed)
-        self.resistivity_var = self._entry(shared, 10, 'Resistivity [ohm.m]:', '1.68e-8')
+        self.resistivity_var = self._entry(shared, 1, 'Resistivity [ohm.m]:', '1.68e-8')
         self.b0_markers_var = tk.BooleanVar(self, value=True)
         ttk.Checkbutton(shared, text='Add aligned B₀ marks to selected gradients',
                         variable=self.b0_markers_var).grid(
-            row=11, column=0, columnspan=2, sticky='w', pady=4)
+            row=2, column=0, columnspan=2, sticky='w', pady=4)
         self.reassign_crossings_var = tk.BooleanVar(self, value=True)
         ttk.Checkbutton(shared, text='Reassign nearby crossings between radial layers',
                         variable=self.reassign_crossings_var).grid(
-            row=12, column=0, columnspan=2, sticky='w', pady=4)
+            row=3, column=0, columnspan=2, sticky='w', pady=4)
 
         roi_frame = ttk.LabelFrame(left, text='ROI per gradient [mm]', padding=8)
         roi_frame.pack(fill='x', pady=4)
@@ -113,14 +125,8 @@ class BatchPanel(ttk.Frame):
 
         layers = ttk.LabelFrame(left, text='Layers: inner to outer', padding=8)
         layers.pack(fill='x', pady=4)
-        ttk.Label(layers, text='Layer order:').grid(row=0, column=0, sticky='w', pady=4)
-        self.order_var = tk.StringVar(self, value='Z, X, Y')
-        ttk.Combobox(layers, textvariable=self.order_var, state='readonly', width=16,
-                     values=['Y, Z, X', 'Y, X, Z', 'X, Y, Z', 'X, Z, Y', 'Z, X, Y', 'Z, Y, X']).grid(
-                         row=0, column=1, columnspan=3, sticky='w')
-        for col, label in enumerate(('Axis', 'Cable Ø [mm]', 'Layer gap [mm]', 'Tikhonov', 'Levels')):
+        for col, label in enumerate(('Axis', 'Layer gap [mm]', 'Tikhonov', 'Levels')):
             ttk.Label(layers, text=label).grid(row=1, column=col, padx=3, pady=3)
-        self.cable_vars = {}
         self.layer_gap_vars = {}
         self.tikhonov_vars = {}
         self.levels_vars = {}
@@ -133,28 +139,20 @@ class BatchPanel(ttk.Frame):
                                     variable=self.enabled_vars[axis])
             label.grid(row=row, column=0, padx=3, pady=3)
             self._layer_rows[axis] = [label]
-            self.cable_vars[axis] = tk.StringVar(self, value='2')
             self.layer_gap_vars[axis] = tk.StringVar(self, value='0')
             self.tikhonov_vars[axis] = tk.StringVar(self, value='2500')
             self.levels_vars[axis] = tk.StringVar(self, value='10')
-            for col, var in enumerate((self.cable_vars[axis], self.layer_gap_vars[axis], self.tikhonov_vars[axis],
+            for col, var in enumerate((self.layer_gap_vars[axis], self.tikhonov_vars[axis],
                                        self.levels_vars[axis]), 1):
                 entry = ttk.Entry(layers, textvariable=var, width=8)
                 entry.grid(row=row, column=col, padx=3, pady=3)
                 self._layer_rows[axis].append(entry)
         for row, axis in enumerate('xyz', 5):
             label = ttk.Label(layers, wraplength=430, justify='left')
-            label.grid(row=row, column=0, columnspan=5, sticky='w', pady=2)
+            label.grid(row=row, column=0, columnspan=4, sticky='w', pady=2)
             self.radius_labels[axis] = label
-        self.radius_note = ttk.Label(layers, text='Radii and gap include the complete gradient: mold, cable and groove. Plastic faces are shown separately.',
-                         wraplength=430, justify='left')
-        self.radius_note.grid(row=8, column=0, columnspan=5, sticky='w', pady=(6, 0))
         self.total_radius_label = ttk.Label(layers, wraplength=430, justify='left')
-        self.total_radius_label.grid(row=9, column=0, columnspan=5, sticky='w', pady=(6, 0))
-        ttk.Label(layers,
-                  text='Select the gradients to generate. Radii and keys are recalculated for the selected set.',
-                  wraplength=430, justify='left').grid(
-            row=10, column=0, columnspan=5, sticky='w', pady=(6, 0))
+        self.total_radius_label.grid(row=8, column=0, columnspan=4, sticky='w', pady=(6, 0))
 
         keys = ttk.LabelFrame(left, text='Assembly keys', padding=8)
         keys.pack(fill='x', pady=4)
@@ -226,28 +224,26 @@ class BatchPanel(ttk.Frame):
         self.log_text.configure(yscrollcommand=log_scroll.set)
         self.runner = WorkerRunner(self.log_text, self.progress, self.root)
 
-        variables = [self.height_var, self.anchor_radius_var, self.radial_gap_var,
-                     self.a_var, self.b_var, self.order_var, self.keys_var, self.b0_markers_var,
+        variables = [self.keys_var, self.b0_markers_var,
                      self.material_var, self.resistivity_var,
                      self.key_length_var, self.key_width_var, self.fit_clearance_var,
                      *(var for values in self.roi_vars.values() for var in values.values()),
-                     *self.roi_spherical_vars.values(), *self.cable_vars.values(), *self.layer_gap_vars.values(),
+                     *self.roi_spherical_vars.values(),
+                     *(var for _, fields, _ in dimension_fields for var in fields.values()),
+                     *self.layer_gap_vars.values(),
                      *self.tikhonov_vars.values(), *self.levels_vars.values(),
                      *self.enabled_vars.values()]
         for variable in variables:
             variable.trace_add('write', self._schedule_preview)
-        self._preview_variables = variables + [self.radius_mode_var]
-        self.radius_mode_var.trace_add('write', self._on_radius_mode_changed)
+        self._preview_variables = variables
         self._bind_scroll(left, canvas)
         tips = [
-            (self._entries[str(self.anchor_radius_var)], 'Use the inner radius of the innermost complete gradient, or the outer radius of the outermost complete gradient, including cable and groove.'),
-            (self._entries[str(self.radial_gap_var)], 'Gap = inner radius of the outer gradient minus outer radius of the inner gradient, including cable and groove. The crossing gap within each gradient is separate.'),
-            (self._entries[str(self.a_var)], 'A multiplies each cable diameter to set the radial groove height. B sets the tangential groove width.'),
-            (self._entries[str(self.b_var)], 'A multiplies each cable diameter to set the radial groove height. B sets the tangential groove width.'),
             (self._entries[str(self.fit_clearance_var)], 'Extra space on each side of the key and at the axial stop. With 0.3 mm, a 4 mm key fits a 4.6 mm wide slot with a 0.3 mm axial gap. Adjust for your printer and material.'),
         ]
-        for widgets in self._layer_rows.values():
-            tips.append((widgets[2], 'Radial gap between cable crossings within this gradient. It contributes to this mold thickness.'))
+        for axis, widgets in self._layer_rows.items():
+            tips.append((self._dimension_entries[axis][0], 'The winding is centered at Z = 0 and uses this length before applying the winding length factor. All molds use the longest selected length.'))
+            tips.append((self._dimension_entries[axis][1], 'Radius of the outer plastic surface, as in Pipeline. The mold radii determine the nesting order.'))
+            tips.append((widgets[1], 'Radial gap between cable crossings within this gradient. It contributes to this mold thickness.'))
         for widget, source in tips:
             self._tooltips.append(_HoverHelp(widget, lambda text=source: self.root.tr(text)))
         self._redraw_preview()
@@ -277,9 +273,6 @@ class BatchPanel(ttk.Frame):
     def _base_config(self):
         cfg = Config(gradient_axis='x', b0_direction=self.root.b0_var.get(), show_plots=False)
         cfg.winding.reassign_crossing_layers = self.reassign_crossings_var.get()
-        cfg.cylinder.height = float(self.height_var.get()) / 1000
-        cfg.wire.cross_section_a_frac = float(self.a_var.get())
-        cfg.wire.cross_section_b_frac = float(self.b_var.get())
         cfg.fasthenry.material = self.material_var.get()
         cfg.fasthenry.specific_conductivity = float(self.resistivity_var.get())
         if not math.isfinite(cfg.fasthenry.specific_conductivity) or cfg.fasthenry.specific_conductivity <= 0:
@@ -290,10 +283,8 @@ class BatchPanel(ttk.Frame):
     def _build_cfg(self):
         """Construct one validated backend batch description; GUI lengths are mm."""
         from halbach_coils.coilgen.batch import BatchConfig, build_layer_configs
-        selected = {axis for axis in 'xyz' if self.enabled_vars[axis].get()}
-        order = tuple(part.strip().lower() for part in self.order_var.get().split(',')
-                      if part.strip().lower() in selected)
-        if not order:
+        selected = tuple(axis for axis in 'xyz' if self.enabled_vars[axis].get())
+        if not selected:
             raise ValueError('Select at least one gradient (X, Y or Z), without duplicates.')
         if self._missing_main_values():
             raise ValueError(self.root.tr('Complete the required design fields before running.'))
@@ -301,26 +292,31 @@ class BatchPanel(ttk.Frame):
         key_values = ((float(self.key_length_var.get()) / 1000,
                        float(self.key_width_var.get()) / 1000,
                        float(self.fit_clearance_var.get()) / 1000)
-                      if self.keys_var.get() and len(order) > 1 else (.004, .004, .0003))
+                      if self.keys_var.get() and len(selected) > 1 else (.004, .004, .0003))
         cfg = BatchConfig(
             base=base,
-            anchor_radius=float(self.anchor_radius_var.get()) / 1000,
-            radius_mode=self.radius_mode_var.get(),
-            axis_order=order,
+            axis_order=selected,
+            outer_radii=tuple(float(self.outer_radius_vars[axis].get()) / 1000
+                              if axis in selected else None for axis in 'xyz'),
+            gradient_lengths=tuple(float(self.length_vars[axis].get()) / 1000
+                                   if axis in selected else base.cylinder.height for axis in 'xyz'),
             roi_dimensions=tuple(
                 tuple(float(self.roi_vars[axis]['x' if self.roi_spherical_vars[axis].get() else dim].get()) / 1000
                       for dim in 'xyz')
                 if axis in selected else None for axis in 'xyz'),
-            radial_gap=float(self.radial_gap_var.get()) / 1000,
             conductor_widths=tuple(float(self.cable_vars[axis].get()) / 1000
                                    if axis in selected else base.wire.conductor_width for axis in 'xyz'),
+            groove_dimensions=tuple(
+                (float(self.groove_height_vars[axis].get()) / 1000,
+                 float(self.groove_width_vars[axis].get()) / 1000)
+                if axis in selected else None for axis in 'xyz'),
             layer_gaps=tuple(float(self.layer_gap_vars[axis].get()) / 1000
                              if axis in selected else base.winding.layer_gap_mm for axis in 'xyz'),
             tikhonov_factors=tuple(float(self.tikhonov_vars[axis].get())
                                    if axis in selected else base.tikhonov_factor for axis in 'xyz'),
             num_levels=tuple(int(self.levels_vars[axis].get())
                              if axis in selected else base.num_levels for axis in 'xyz'),
-            include_keys=self.keys_var.get() and len(order) > 1,
+            include_keys=self.keys_var.get() and len(selected) > 1,
             include_b0_markers=self.b0_markers_var.get(),
             parallel_gradients=self.parallel_gradients_var.get(),
             key_length=key_values[0],
@@ -328,17 +324,17 @@ class BatchPanel(ttk.Frame):
             fit_clearance=key_values[2],
             output_dir=self.get_output_dir(),
         )
-        build_layer_configs(cfg)
+        cfg.axis_order = tuple(layer.gradient_axis for layer in build_layer_configs(cfg))
         return cfg
 
     def _missing_main_values(self):
-        variables = [self.height_var, self.anchor_radius_var, self.radial_gap_var,
-                     self.a_var, self.b_var, self.material_var, self.resistivity_var]
+        variables = [self.material_var, self.resistivity_var]
         selected = [axis for axis in 'xyz' if self.enabled_vars[axis].get()]
         for axis in selected:
             variables.extend(self.roi_vars[axis][dim] for dim in
                              ('x' if self.roi_spherical_vars[axis].get() else 'xyz'))
-            variables.extend((self.cable_vars[axis], self.layer_gap_vars[axis],
+            variables.extend((self.length_vars[axis], self.outer_radius_vars[axis], self.cable_vars[axis],
+                              self.groove_height_vars[axis], self.groove_width_vars[axis], self.layer_gap_vars[axis],
                               self.tikhonov_vars[axis], self.levels_vars[axis]))
         if self.keys_var.get() and len(selected) > 1:
             variables.extend((self.key_length_var, self.key_width_var, self.fit_clearance_var))
@@ -355,21 +351,22 @@ class BatchPanel(ttk.Frame):
             self.after_cancel(self._preview_pending)
         self._preview_pending = self.after(250, self._redraw_preview)
 
-    def _on_radius_mode_changed(self, *_args):
-        from halbach_coils.coilgen.batch import gradient_radial_bounds
-        mode = self.radius_mode_var.get()
-        if mode != self._radius_mode and self._last_layers:
-            value = (gradient_radial_bounds(self._last_layers[0])[0] if mode == 'inner'
-                     else gradient_radial_bounds(self._last_layers[-1])[1])
-            self.anchor_radius_var.set(f'{value * 1000:.7g}')
-        self._radius_mode = mode
-        self._schedule_preview()
-
     def _preview_signature(self):
         return tuple(variable.get() for variable in self._preview_variables) + (
             self.root.b0_var.get(),
             *(variable.get() for variable in self.coilgen_advanced.variables.values()),
         )
+
+    def _clear_preview(self, message, color):
+        self._last_layers = None
+        self.ax3d.clear()
+        self.radial_ax.clear()
+        for axis, label in self.radius_labels.items():
+            if self.enabled_vars[axis].get():
+                label.configure(text='')
+        self.total_radius_label.configure(text='')
+        self.preview_notice.configure(text=self.root.tr(message), foreground=color)
+        self.figure_canvas.draw_idle()
 
     def _redraw_preview(self):
         if self._preview_pending is not None:
@@ -378,58 +375,44 @@ class BatchPanel(ttk.Frame):
         if not hasattr(self, 'ax3d'):
             return
         selected_count = sum(var.get() for var in self.enabled_vars.values())
-        for row, axis in enumerate(
-                (part.strip().lower() for part in self.order_var.get().split(',')), 2):
-            for widget in self._layer_rows[axis]:
-                widget.grid_configure(row=row)
-            for entry in self._layer_rows[axis][1:]:
+        for axis in 'xyz':
+            for entry in (*self._layer_rows[axis][1:], *self._dimension_entries[axis]):
                 entry.configure(state='normal' if self.enabled_vars[axis].get() else 'disabled')
-            self.radius_labels[axis].grid_configure(row=row+3)
             if not self.enabled_vars[axis].get():
                 self.radius_labels[axis].configure(
                     text=self.root.tr('{axis}: excluded from batch', axis='G'+axis.upper()))
         for child in self.key_dimensions.winfo_children():
             child.configure(state='normal' if self.keys_var.get() and selected_count > 1 else 'disabled')
         if selected_count and self._missing_main_values():
-            self._last_layers = None
-            self.ax3d.clear()
-            self.radial_ax.clear()
-            for axis in 'xyz':
-                if self.enabled_vars[axis].get():
-                    self.radius_labels[axis].configure(text='')
-            self.total_radius_label.configure(text='')
-            self.preview_notice.configure(text=self.root.tr('Enter the design values to see the preview.'),
-                                          foreground='#666666')
-            self.figure_canvas.draw_idle()
+            self._clear_preview('Enter the design values to see the preview.', '#666666')
             return
         try:
             from halbach_coils.coilgen.batch import build_layer_configs
             cfg = self._build_cfg()
             layers = build_layer_configs(cfg)
         except (ValueError, ZeroDivisionError, OverflowError) as exc:
-            if not selected_count:
-                self._last_layers = None
-                self.ax3d.clear()
-                self.radial_ax.clear()
-                self.total_radius_label.configure(text='')
-                self.figure_canvas.draw_idle()
-            self.preview_notice.configure(text=self.root.tr(str(exc)), foreground='#a32323')
+            self._clear_preview(str(exc), '#a32323')
             return
         self._last_layers = layers
+        displayed_axes = (*cfg.axis_order, *(axis for axis in 'xyz' if axis not in cfg.axis_order))
+        for row, axis in enumerate(displayed_axes, 2):
+            for widget in self._layer_rows[axis]:
+                widget.grid_configure(row=row)
+            self.radius_labels[axis].grid_configure(row=row + 3)
         # Filled in with the same backend dimensions used to export the molds.
         try:
             self._draw_geometry(cfg, layers)
         except (ValueError, RuntimeError) as exc:
-            self.preview_notice.configure(text=self.root.tr(str(exc)), foreground='#a32323')
+            self._clear_preview(str(exc), '#a32323')
 
     def _draw_geometry(self, batch, layers):
-        from halbach_coils.coilgen.batch import gradient_radial_bounds
+        from halbach_coils.coilgen.batch import gradient_radial_bounds, mold_radial_gap
         ax, section = self.ax3d, self.radial_ax
         elev, azim = ax.elev, ax.azim
         ax.clear()
         section.clear()
         theta = np.linspace(0, 2 * math.pi, 73)
-        height = batch.base.cylinder.height * 1000
+        height = layers[0].cylinder.height * 1000
         for cfg in layers:
             axis = cfg.gradient_axis
             inner, outer = cfg.shell_inner_radius * 1000, cfg.shell_outer_radius * 1000
@@ -439,29 +422,31 @@ class BatchPanel(ttk.Frame):
             t, z = np.meshgrid(theta, [-height/2, height/2])
             ax.plot_surface(outer*np.cos(t), outer*np.sin(t), z, color=color, alpha=.18,
                             linewidth=0, antialiased=True)
+            design_radius = cfg.cylinder_design_radius * 1000
+            winding_half = height * cfg.cylinder.mesh_length_factor / 2
             if self.coilgen_advanced.expanded.get():
                 refinement = 2 ** cfg.advanced.iteration_num_mesh_refinement
                 mesh_theta, mesh_z = np.meshgrid(
                     np.linspace(0, 2*math.pi, min(cfg.cylinder.n_circ*refinement+1, 61)),
-                    np.linspace(-height/2, height/2, min(cfg.cylinder.n_long*refinement+1, 31)))
-                design_radius = cfg.cylinder_design_radius*1000
-                ax.plot_wireframe(design_radius*np.cos(mesh_theta), design_radius*np.sin(mesh_theta),
-                                  mesh_z*cfg.cylinder.mesh_length_factor,
+                    np.linspace(-winding_half, winding_half, min(cfg.cylinder.n_long*refinement+1, 31)))
+                ax.plot_wireframe(design_radius*np.cos(mesh_theta), design_radius*np.sin(mesh_theta), mesh_z,
                                   color=color, alpha=.25, linewidth=.4)
+            for end in (-winding_half, winding_half):
+                ax.plot(design_radius*np.cos(theta), design_radius*np.sin(theta), np.full_like(theta, end),
+                        color=color, linestyle=':', linewidth=1)
             for end in (-height/2, height/2):
                 for radius in (inner, outer):
                     ax.plot(radius*np.cos(theta), radius*np.sin(theta), np.full_like(theta, end),
                             color=color, linewidth=1)
             self.radius_labels[axis].configure(text=self.root.tr(
-                '{axis}: gradient {gradient_inner:.2f}–{gradient_outer:.2f} mm\nMold {inner:.2f}–{outer:.2f} mm; wall {wall:.2f} mm; groove {height:.2f} × {width:.2f} mm',
+                '{axis}: gradient {gradient_inner:.2f}–{gradient_outer:.2f} mm\nMold {inner:.2f}–{outer:.2f} mm · wall {wall:.2f} mm\nReal cable Ø {diameter:.2f} mm · Groove {height:.2f} × {width:.2f} mm',
                 gradient_inner=gradient_radial_bounds(cfg)[0]*1000,
                 gradient_outer=gradient_radial_bounds(cfg)[1]*1000,
                 axis='G'+axis.upper(), inner=inner, outer=outer,
                 wall=cfg.shell_wall_thickness * 1000,
+                diameter=cfg.wire.conductor_width * 1000,
                 height=cfg.groove_radial_height * 1000,
-                width=cfg.groove_tangential_width * 1000,
-                wire_inner=cfg.estimated_wire_inner_radius * 1000,
-                wire_outer=cfg.estimated_wire_outer_radius * 1000))
+                width=cfg.groove_tangential_width * 1000))
             gradient_inner, gradient_outer = gradient_radial_bounds(cfg)
             section.add_patch(Wedge((0, 0), gradient_outer*1000, 0, 360,
                                     width=(gradient_outer-gradient_inner)*1000,
@@ -533,8 +518,13 @@ class BatchPanel(ttk.Frame):
         notice = self.root.tr(
             'Inner to outer: {order}. B₀ {direction}. Preview shows dimensions; grooves require a design run.',
             order=order, direction=batch.base.b0_direction.upper())
-        notice += '\n' + self.root.tr('Separation between complete gradients: {gap:.2f} mm.',
-                                     gap=batch.radial_gap * 1000)
+        notice += '\n' + self.root.tr(
+            'Shared mold length: {length:.2f} mm. Dotted rings mark the winding mesh ends.',
+            length=height)
+        if len(layers) > 1:
+            gaps = ' · '.join(f'{inner.axis_label} → {outer.axis_label} {1000 * max(0, mold_radial_gap(inner, outer)):.2f} mm'
+                              for inner, outer in zip(layers, layers[1:]))
+            notice += '\n' + self.root.tr('Mold gaps: {gaps}', gaps=gaps)
         if batch.include_keys:
             notice += '\n' + self.root.tr(
                 'Key clearance: {clearance:.2f} mm per side and at the axial stop.',

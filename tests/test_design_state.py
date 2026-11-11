@@ -35,6 +35,15 @@ def test_saved_state_is_deterministic_and_validates_binary_sidecar(tmp_path):
     validate_design_state(wire, cfg)
 
 
+def test_historical_auto_cut_side_remains_reusable_but_high_is_a_design_change(tmp_path):
+    wire, _, cfg, state = _saved_design(tmp_path)
+    assert 'connection_cut_side' not in json.loads(state.read_text())['config']['advanced']
+    validate_design_state(wire,cfg)
+    cfg.advanced.connection_cut_side = 'high'
+    with pytest.raises(ValueError,match='connection_cut_side'):
+        validate_design_state(wire,cfg)
+
+
 @pytest.mark.parametrize('field,value', [
     ('b0_direction', '+y'), ('gradient_axis', 'x'),
     ('tikhonov_factor', 2000), ('num_levels', 12),

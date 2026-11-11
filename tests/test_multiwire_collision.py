@@ -7,6 +7,42 @@ from halbach_coils.coilgen.overlap import detect_collisions
 from pyCoilGen.sub_functions.shift_return_paths import intersection_points_for_pairs
 
 
+def _physical_crossing(height):
+    path = np.array([[-.01,0,0],[.01,0,0],[.01,.02,0],
+                     [0,.02,height],[0,-.01,height]], float)
+    part = SimpleNamespace(wire_path=SimpleNamespace(v=path.T, uv=path[:,:2].T))
+    return SimpleNamespace(coil_parts=[part])
+
+
+def test_real_round_wire_uses_diameter_independently_of_four_mm_groove():
+    cfg = Config()
+    assert cfg.cable_height == .004 and cfg.wire.conductor_width == .002
+    # Three millimetres separates 2 mm wire even though the CAD profile is 4 mm.
+    assert detect_collisions(_physical_crossing(.003), cfg).n_collisions == 0
+    report = detect_collisions(_physical_crossing(.001), cfg)
+    assert report.n_collisions == 1
+    assert report.sites[0].minimum_distance_m == .001
+    assert report.sites[0].required_separation_m == .002
+
+
+def test_dense_connected_curve_and_closed_seam_do_not_alert():
+    t = np.linspace(0, 2*np.pi, 2001)
+    path = np.array([.03*np.cos(t), .03*np.sin(t), np.zeros_like(t)])
+    solution = SimpleNamespace(coil_parts=[SimpleNamespace(
+        wire_path=SimpleNamespace(v=path, uv=path[:2]))])
+    assert detect_collisions(solution, Config()).n_collisions == 0
+
+
+def test_ramp_contact_outside_a_projected_crossing_is_still_detected():
+    # Parallel branches have no UV crossing, but overlap physically.
+    path = np.array([[-.01,0,0],[.01,0,0],[.01,.02,0],
+                     [-.01,.02,0],[-.01,.001,0],[.01,.001,0]])
+    solution = SimpleNamespace(coil_parts=[SimpleNamespace(
+        wire_path=SimpleNamespace(v=path.T, uv=path[:,:2].T),
+        crossing_segments=np.empty((0,2),int))])
+    assert detect_collisions(solution, Config()).n_collisions > 0
+
+
 def _solution(points, segments, positions, layers):
     part = SimpleNamespace(
         crossing_points_uv=np.asarray(points, dtype=float),

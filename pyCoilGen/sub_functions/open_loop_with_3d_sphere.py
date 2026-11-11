@@ -65,7 +65,7 @@ def open_loop_with_3d_sphere(curve_points_in: Shape3D, sphere_center: np.ndarray
 
         for part_ind in range(len(parts_start)):
             parts_avg_dist[part_ind] = np.mean(np.linalg.norm(
-                curve_points.v[:, parts_start[part_ind]:parts_end[part_ind]] - sphere_center, axis=0))
+                curve_points.v[:, parts_start[part_ind]:parts_end[part_ind]+1] - sphere_center, axis=0))
 
         try:
             nearest_part = np.nanargmin(parts_avg_dist)

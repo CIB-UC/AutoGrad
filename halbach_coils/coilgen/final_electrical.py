@@ -25,14 +25,16 @@ from .process_control import WindowsJob
 
 
 def simplify_current_path(path, tolerance):
-    """RDP in 3D: omitted points stay within tolerance of retained segments."""
+    """RDP in 3D; zero tolerance preserves every nonzero input segment."""
     path = np.asarray(path, dtype=float)
     if (path.ndim != 2 or path.shape[1] != 3 or len(path) < 2
-            or not np.all(np.isfinite(path)) or not np.isfinite(tolerance) or tolerance <= 0):
-        raise ValueError('Expected a finite N x 3 current path and positive tolerance.')
+            or not np.all(np.isfinite(path)) or not np.isfinite(tolerance) or tolerance < 0):
+        raise ValueError('Expected a finite N x 3 current path and non-negative tolerance.')
     path = path[np.r_[True, np.linalg.norm(np.diff(path, axis=0), axis=1) > 1e-12]]
     if len(path) < 2:
         raise ValueError('The current path has no nonzero segments.')
+    if tolerance == 0:
+        return path.copy()
     keep = {0, len(path) - 1}
     pending = [(0, len(path) - 1)]
     while pending:
@@ -175,7 +177,7 @@ def evaluate_final_electrical(cfg, path_N3, output_dir, tolerance=2e-5, timeout=
     simplified = simplify_current_path(path_N3, tolerance)
     path = np.asarray(path_N3, dtype=float)
     length = float(np.linalg.norm(np.diff(path, axis=0), axis=1).sum())
-    area, resistivity = float(cfg.electrical_cross_section_area), float(cfg.fasthenry.specific_conductivity)
+    area, resistivity = float(cfg.electrical_cross_section_area), float(cfg.fasthenry.resistivity_ohm_m)
     if not np.isfinite(area) or not np.isfinite(resistivity) or area <= 0 or resistivity <= 0:
         raise ValueError('Conductor area and resistivity must be positive finite numbers.')
     solver_length = float(np.linalg.norm(np.diff(simplified, axis=0), axis=1).sum())
@@ -188,6 +190,8 @@ def evaluate_final_electrical(cfg, path_N3, output_dir, tolerance=2e-5, timeout=
         'original_length_m': length, 'solver_length_m': solver_length,
         'relative_length_change': abs(solver_length - length) / length,
         'cross_section_m2': area, 'analytic_resistance_ohm': resistivity * length / area,
+        'resistivity_ohm_m': resistivity, 'conductivity_S_per_m': 1.0 / resistivity,
+        'solver_analytic_resistance_ohm': resistivity * solver_length / area,
         'note': 'Low-frequency partial inductance of the modeled conductor; supply and return wiring excluded.',
     }
     if not cfg.fasthenry.enabled:

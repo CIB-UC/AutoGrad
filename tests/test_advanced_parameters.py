@@ -21,6 +21,7 @@ from halbach_coils.gui.advanced_controls import AdvancedControls  # noqa: E402
 
 def test_advanced_defaults_match_current_engine_and_existing_geometry():
     cfg = Config()
+    assert (cfg.cylinder.n_circ, cfg.cylinder.n_long) == (100, 40)
     _, engine = parse_input(False)
     args = AdvancedConfig().to_coilgen_args()
     for key, value in args.items():
@@ -32,6 +33,13 @@ def test_advanced_defaults_match_current_engine_and_existing_geometry():
     before = json.dumps(config_to_preset(cfg), sort_keys=True)
     apply_advanced_values(cfg, config_values(cfg))
     assert json.dumps(config_to_preset(cfg), sort_keys=True) == before
+
+
+def test_high_cut_side_maps_to_the_existing_engine_route():
+    advanced = AdvancedConfig(connection_cut_side='high')
+    assert advanced.to_coilgen_args()['force_cut_selection'] == ['high']
+    assert AdvancedConfig().to_coilgen_args()['force_cut_selection'] == []
+    assert AdvancedConfig(connection_cut_side='low').to_coilgen_args()['force_cut_selection'] == ['low']
 
 
 def test_advanced_changes_map_to_existing_blocks_and_valid_engine_arguments():

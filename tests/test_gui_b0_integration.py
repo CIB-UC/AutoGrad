@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'halbach_coils'))
 
 
 @pytest.fixture
-def app():
+def app(fill_gui_design):
     import tkinter as tk
     from gui.main_window import CoilGenApp
 
@@ -21,6 +21,7 @@ def app():
         raise
     window.withdraw()
     window.update()
+    fill_gui_design(window)
     yield window
     window.destroy()
 
@@ -59,3 +60,15 @@ def test_preview_roi_uses_bore_z_and_physical_labels(app):
     assert panel.geo3d_ax.get_ylabel() == 'Y [mm]'
     assert panel.geo3d_ax.get_zlabel() == 'Z [mm]'
     assert 'B₀ -Z' in panel.geo3d_caption.get_text()
+
+
+def test_pipeline_marker_toggle_is_binary_and_does_not_enable_batch_marks(app):
+    panel = app.pipeline_panel
+    assert panel._build_cfg().shell.b0_marker is True
+    panel.b0_marker_var.set(False)
+    disabled = panel._build_cfg()
+    assert disabled.shell.b0_marker is False
+    panel.b0_marker_var.set(True)
+    panel.apply_config(disabled)
+    assert panel.b0_marker_var.get() is False
+    assert app.batch_panel._build_cfg().base.shell.b0_marker is False

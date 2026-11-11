@@ -17,7 +17,21 @@ LANGUAGES = {"en": "English", "es": "Español"}
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "es": {
-        "pyCoilGen - MRI gradient coil design": "pyCoilGen - Diseño de bobinas de gradiente MRI",
+        'Enter the design values to see the preview.': 'Introduce los valores de diseño para ver la vista previa.',
+        'Complete the required design fields before running.': 'Completa los campos de diseño requeridos antes de ejecutar.',
+        'Design needs revision': 'El diseño necesita revisión',
+        'Diagnostic files kept in:\n{path}': 'Archivos de diagnóstico conservados en:\n{path}',
+        'Winding geometry': 'Geometría del bobinado',
+        'Wire clear': 'Cable sin interferencias',
+        'Turns too close': 'Vueltas demasiado juntas',
+        'Calculation failed': 'Falló el cálculo',
+        'Unverified': 'Sin verificar',
+        'needs_revision': 'necesita revisión',
+        'This winding has not passed the wire clearance check. Run a new sweep or select a valid row.':
+            'Este bobinado no ha pasado la comprobación de separación del cable. Ejecute otro barrido o seleccione una fila válida.',
+        'No winding without interference was found. Try fewer levels, more winding space or another parameter range. All attempts were kept in:\n{path}':
+            'No se encontró un bobinado sin interferencias. Pruebe menos niveles, más espacio de bobinado u otro rango de parámetros. Todos los intentos se conservaron en:\n{path}',
+        "AutoGrad - MRI gradient coil design": "AutoGrad - Diseño de bobinas de gradiente MRI",
         "Settings": "Configuración",
         "Final conductor — FastHenry R: {resistance} Ω | L: {inductance} µH": "Conductor final — FastHenry R: {resistance} Ω | L: {inductance} µH",
         "Final conductor — FastHenry: {status}. {reason}": "Conductor final — FastHenry: {status}. {reason}",
@@ -29,7 +43,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Browse...": "Examinar...",
         "Tikhonov sweep": "Barrido Tikhonov",
         "Batch design": "Diseño en lote",
+        "Design selected gradients": "Diseñar gradientes seleccionados",
+        "Add aligned B₀ marks to selected gradients": "Añadir marcas B₀ alineadas a los gradientes seleccionados",
+        "Reassign nearby crossings between radial layers": "Reasignar cruces cercanos entre capas radiales",
+        "Select the gradients to generate. Radii and keys are recalculated for the selected set.":
+            "Selecciona los gradientes que se generarán. Los radios y encajes se recalculan para el conjunto seleccionado.",
+        "{axis}: excluded from batch": "{axis}: excluido del lote",
+        "Select at least one gradient (X, Y or Z), without duplicates.":
+            "Selecciona al menos un gradiente (X, Y o Z), sin repetir ejes.",
+        "Generate gradients simultaneously (one process each)":
+            "Generar gradientes en simultáneo (un proceso por gradiente)",
         "Shared dimensions": "Dimensiones compartidas",
+        "ROI per gradient [mm]": "ROI por gradiente [mm]",
+        "Spherical": "Esférico",
+        "Show ROI:": "Mostrar ROI:",
+        "Gradient": "Gradiente",
         "Inner gradient radius": "Radio interior del gradiente",
         "Outer gradient radius": "Radio exterior del gradiente",
         "Radii and gap include the complete gradient: mold, cable and groove. Plastic faces are shown separately.":
@@ -38,24 +66,47 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Usa el radio interior del gradiente completo más interno o el exterior del más externo, incluyendo cable y ranura.",
         "Gap = inner radius of the outer gradient minus outer radius of the inner gradient, including cable and groove. The crossing gap within each gradient is separate.":
             "Gap = radio interno del gradiente exterior menos radio externo del interior, incluyendo cable y ranura. El gap de cruces dentro de cada gradiente es independiente.",
-        "{axis}: gradient {gradient_inner:.2f}–{gradient_outer:.2f} mm\nMold {inner:.2f}–{outer:.2f} mm; wall {wall:.2f} mm; groove {height:.2f} × {width:.2f} mm":
-            "{axis}: gradiente {gradient_inner:.2f}–{gradient_outer:.2f} mm\nMolde {inner:.2f}–{outer:.2f} mm; grosor {wall:.2f} mm; ranura {height:.2f} × {width:.2f} mm",
+        "{axis}: gradient {gradient_inner:.2f}–{gradient_outer:.2f} mm\nMold {inner:.2f}–{outer:.2f} mm · wall {wall:.2f} mm\nReal cable Ø {diameter:.2f} mm · Groove {height:.2f} × {width:.2f} mm":
+            "{axis}: gradiente {gradient_inner:.2f}–{gradient_outer:.2f} mm\nMolde {inner:.2f}–{outer:.2f} mm · grosor {wall:.2f} mm\nCable real Ø {diameter:.2f} mm · Ranura {height:.2f} × {width:.2f} mm",
         "Separation between complete gradients: {gap:.2f} mm.":
             "Separación entre gradientes completos: {gap:.2f} mm.",
         "Inner mold radius": "Radio interior del conjunto",
         "Outer mold radius": "Radio exterior del conjunto",
         "Reference radius [mm]:": "Radio de referencia [mm]:",
+        "The reference radius is too small for the selected gradients and gaps.":
+            "El radio de referencia es demasiado pequeño para los gradientes y separaciones seleccionados.",
         "Gap between gradients [mm]:": "Separación entre gradientes [mm]:",
         "Cable Ø [mm]": "Ø cable [mm]",
         "Layer gap [mm]": "Gap capas [mm]",
+        "Gradient dimensions [mm]": "Dimensiones por gradiente [mm]",
+        "Mold outer radius": "Radio externo del molde",
+        "Radius of the outer plastic surface, as in Pipeline. The mold radii determine the nesting order.":
+            "Radio de la superficie externa de plástico, igual que en Pipeline. Los radios de los moldes determinan el orden de las capas.",
+        "Mold gaps: {gaps}": "Separación entre moldes: {gaps}",
+        "Mold outer radius must be finite and positive.": "El radio externo del molde debe ser finito y positivo.",
+        "Each mold outer radius must exceed its wall thickness.":
+            "El radio externo de cada molde debe ser mayor que el grosor de su pared.",
+        "Adjacent mold walls overlap. Adjust the outer radii or the wall dimensions.":
+            "Las paredes de los moldes vecinos se solapan. Ajusta los radios externos o el grosor de las paredes.",
+        "Length": "Largo",
+        "Real cable diameter": "Diámetro real del cable",
+        "Groove height": "Altura de la ranura",
+        "Groove width": "Ancho de la ranura",
+        "Groove height must be finite and positive.": "La altura de la ranura debe ser finita y positiva.",
+        "Groove width must be finite and positive.": "El ancho de la ranura debe ser finito y positivo.",
+        "Wire diameter must be finite and positive.": "El diámetro del cable debe ser finito y positivo.",
+        "The winding is centered at Z = 0 and uses this length before applying the winding length factor. All molds use the longest selected length.":
+            "El bobinado se centra en Z = 0 y usa este largo antes de aplicar el factor de largo del bobinado. Todos los moldes usan el mayor largo seleccionado.",
+        "Shared mold length: {length:.2f} mm. Dotted rings mark the winding mesh ends.":
+            "Largo común de los moldes: {length:.2f} mm. Los anillos punteados marcan los extremos de la malla de bobinado.",
+        "Gradient length must be finite and positive.": "El largo del gradiente debe ser finito y positivo.",
+        "The ROI must fit inside the cylinder height.": "La ROI debe caber dentro del largo del cilindro.",
         "One reference radius fixes the set. Cable dimensions and crossings determine each mold thickness.":
             "Un radio de referencia define el conjunto. El cable y sus cruces determinan el grosor de cada molde.",
         "Use the inner radius of the innermost mold, or the outer radius of the outermost mold. All other radii are calculated.":
             "Usa el radio interior del molde más interno o el radio exterior del molde más externo. Los demás radios se calculan.",
         "Clearance between neighboring mold bodies. This is separate from the crossing gap inside each gradient.":
             "Separación entre los cuerpos de moldes vecinos. Es independiente del gap de cruces dentro de cada gradiente.",
-        "A multiplies each cable diameter to set the radial groove height. B sets the tangential groove width.":
-            "A multiplica el diámetro de cada cable para definir la altura radial del surco. B define su ancho tangencial.",
         "Radial gap between cable crossings within this gradient. It contributes to this mold thickness.":
             "Separación radial entre los cruces de cable dentro de este gradiente. Se incluye en el grosor del molde.",
         "{axis}: mold {inner:.2f}–{outer:.2f} mm; wall {wall:.2f} mm\nGroove {height:.2f} × {width:.2f} mm; cable envelope {wire_inner:.2f}–{wire_outer:.2f} mm":
@@ -137,6 +188,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "STL pair (assets/shells):": "Par STL (assets/shells):",
         "Radial trim (% cable height):": "Recorte radial (% alto del cable):",
         "Gap between layers [mm]:": "Separación entre capas [mm]:",
+        "Add B₀ orientation marks to the shell": "Agregar marcas de orientación de B₀ al molde",
+        "Add aligned B₀ marks to all three gradients": "Agregar marcas alineadas de B₀ a los tres gradientes",
+        "B₀ marks share one azimuth. Final placement is checked against grooves and keys.":
+            "Las marcas de B₀ comparten una posición angular. Su ubicación final se comprueba con los surcos y encajes.",
         "Presets": "Presets",
         "Save preset...": "Guardar preset...",
         "Load preset...": "Cargar preset...",
@@ -171,6 +226,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Levels:": "Niveles:",
         "Coarse points:": "Puntos gruesos:",
         "Fine adjustment": "Ajuste fino",
+        "Simultaneous processes:": "Procesos simultáneos:",
+        "1 = sequential": "1 = secuencial",
+        "Processes must be an integer between 1 and {maximum}.":
+            "La cantidad de procesos debe ser un entero entre 1 y {maximum}.",
         "Run sweep": "Ejecutar barrido",
         "Load previous CSV...": "Cargar CSV anterior...",
         "Use selected in Pipeline": "Usar selección en Pipeline",

@@ -46,8 +46,10 @@ from .sub_functions.calculate_group_centers import calculate_group_centers
 from .sub_functions.interconnect_within_groups import interconnect_within_groups
 from .sub_functions.interconnect_among_groups import interconnect_among_groups
 from .sub_functions.shift_return_paths import shift_return_paths
+from .sub_functions.return_path_trace import save_return_path_traces
 from .sub_functions.generate_cylindrical_pcb_print import generate_cylindrical_pcb_print
 from .sub_functions.create_sweep_along_surface import create_sweep_along_surface
+from .sub_functions.routing_recovery import capture_routing_inputs, recover_routing
 from .sub_functions.calculate_inductance_by_coil_layout import calculate_inductance_by_coil_layout
 from .sub_functions.load_preoptimized_data import load_preoptimized_data
 from .sub_functions.evaluate_field_errors import evaluate_field_errors
@@ -309,6 +311,7 @@ def pyCoilGen(log, input_args=None):
             #####################################################
 
             # Interconnect the single groups
+            routing_seed = capture_routing_inputs(coil_parts, input_args)
             print('Interconnect the single groups:')
             timer.start()
             coil_parts = interconnect_within_groups(coil_parts, input_args)  # 15
@@ -338,6 +341,7 @@ def pyCoilGen(log, input_args=None):
             print('Shift the return paths over the surface:')
             timer.start()
             coil_parts = shift_return_paths(coil_parts, input_args)  # 17
+            save_return_path_traces(coil_parts, input_args, stage='shifted')
             timer.stop()
             runpoint_tag = '17'
 
@@ -352,6 +356,14 @@ def pyCoilGen(log, input_args=None):
             print('Create sweep along surface:')
             timer.start()
             coil_parts = create_sweep_along_surface(coil_parts, input_args)
+            save_return_path_traces(coil_parts, input_args, stage='swept')
+            coil_parts = recover_routing(routing_seed, coil_parts, input_args, (
+                interconnect_within_groups, interconnect_among_groups,
+                shift_return_paths, generate_cylindrical_pcb_print,
+                lambda parts, args: create_sweep_along_surface(parts, args, validation_only=True)),
+                finalize=lambda parts, args: create_sweep_along_surface(parts, args, prepared=True))
+            solution.coil_parts = coil_parts
+            save_return_path_traces(coil_parts, input_args, stage='recovered')
             timer.stop()
             runpoint_tag = '19'
 
@@ -370,6 +382,7 @@ def pyCoilGen(log, input_args=None):
             coil_parts, input_args, solution.target_field, solution.sf_b_field)
         timer.stop()
         solution.solution_errors = solution_errors
+        save_return_path_traces(coil_parts, input_args, stage='final')
         log.info("Layout error: Mean: %f, Max: %f",
                  solution_errors.field_error_vals.mean_rel_error_layout_vs_target,
                  solution_errors.field_error_vals.max_rel_error_layout_vs_target

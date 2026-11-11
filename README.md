@@ -1,397 +1,229 @@
-# Halbach Gradient Coils
+# AutoGrad
 
-Design and manufacturing workflow for `Gx`, `Gy`, and `Gz` gradient coils for a low-field MRI scanner based on a Halbach magnet. The project uses the included `pyCoilGen` engine to optimise wire tracks, then generates lead wires and printable shell geometry for a negative winding mould.
+Design `Gx`, `Gy` and `Gz` gradient coils for a low-field MRI scanner based on a
+Halbach magnet. AutoGrad combines a graphical application, the included
+`pyCoilGen` engine, terminal routing, field evaluation and STL mould generation.
+It can also assemble three concentric gradients with alignment keys and B₀ marks.
 
-This repository is self-contained: cloning it provides both the Halbach-specific application and the local `pyCoilGen` source it requires.
+This checkout includes the application, its modified engine, reusable shell
+inputs and regression tests. No separate clone or global installation of
+`pycoilgen` is needed.
 
-## Quick start
+## Quick start on Windows
 
-For the shortest path from a fresh Windows computer to the application:
-
-1. Install a 64-bit release of Python 3.11, 3.12, 3.13, or 3.14 from
-   [python.org](https://www.python.org/downloads/windows/). Do not use Python
-   3.14.1.
-2. Download the repository as a ZIP and extract the complete folder, or clone
-   it with Git:
+1. Install **64-bit CPython 3.11, 3.12, 3.13 or 3.14**, with Tkinter. The project
+   explicitly excludes Python **3.14.1**; use another supported patch release.
+2. Clone this repository, or download its ZIP and extract the complete folder:
 
    ```powershell
-   git clone https://github.com/cSOZAo/halbach-gradient-coils.git
-   cd halbach-gradient-coils
+   git clone https://github.com/CIB-UC/Gradients-PyCoilGen.git AutoGrad
+   cd AutoGrad
    ```
 
-3. Double-click `GradientDesign.bat`. The first launch creates an isolated
-   `.venv`, installs the pinned dependencies, verifies them, and opens the GUI.
-4. Choose an **Output directory**, review the defaults in the **Pipeline** tab,
-   and select **Run pipeline**. A design may take several minutes.
+3. Double-click **`AutoGrad.bat`**. First launch creates `.venv`, installs
+   the dependencies declared in `pyproject.toml`, checks them and opens the GUI.
+   Internet access is required for setup unless the packages are cached.
+4. Choose an **Output directory**, review the **Pipeline** parameters and select
+   **Run pipeline**. Computation may take several minutes.
 
-No global Python packages are changed. Internet access is needed during the
-first setup only, unless the required packages are already cached locally.
+The GUI starts in English. Use **Settings > Language > Español** for Spanish;
+this selection lasts for the current session. The launcher uses the project's
+virtual environment and leaves global Python packages unchanged.
 
-## Scope and status
+## Application modes
 
-The application provides a configuration-driven pipeline for:
+| Mode | Workflow |
+| --- | --- |
+| **Pipeline** | Optimise one gradient, route its terminal leads, evaluate the final conductor and carve the winding grooves into a mould. |
+| **Batch design** | Run the selected concentric gradients in their nesting order, optionally in parallel, check their final geometry and export the assembled moulds. |
+| **Tikhonov sweep** | Compare regularisation factors, validate winding clearance, optionally refine the range and restore a valid result in Pipeline. |
 
-1. Creating a cylindrical design mesh and target field.
-2. Optimising a wire layout with `pyCoilGen`.
-3. Detecting locations where three or more return-path branches compete for
-   the same two radial cable layers.
-4. Adding lead wires to the coil layout.
-5. Cutting the wire grooves into an STL shell for manufacturing.
-6. Optionally evaluating resistance and inductance through FastHenry2.
+The GUI supports Cu, Al, Ag and custom resistivity, advanced mesh/ROI and winding
+parameters, saved field plots and cancellation of the calculation process and
+its children. Only one calculation runs at a time. Cancelled or failed runs keep
+partial files and a status marker.
 
-The current workflow is intended for iterative engineering work. Treat generated geometry and electrical values as design inputs that still require physical and simulation validation before manufacture.
+Batch designs can include any nonempty selection of Gx, Gy and Gz. Independent
+gradient calculations and sweep samples can run in separate processes; Windows
+FastHenry extraction remains serial. A known geometric failure produces a
+`needs_revision` result with its files and diagnostics retained. Other selected
+axes can finish, but the assembly requires valid results from every included axis.
+Sweep recommendations use only geometrically valid rows with finite metrics.
+See [geometry recovery and result states](docs/GEOMETRY_RECOVERY.md).
 
-## Repository layout
+This is an engineering design tool. A completed numerical run does not certify
+field linearity, winding feasibility or printed fit. Review final field and
+geometry reports before manufacture. The [validation notes](docs/VALIDATION.md)
+describe the tested cases and their limits, including collisions found with
+starting parameters and the field error of a geometrically valid example.
 
-```text
-halbach-gradient-coils/
-├── halbach_coils/          # Halbach application (formerly named pruebas)
-│   ├── coilgen/            # pipeline implementation and configuration
-│   ├── gui/                # Tkinter user interface
-│   ├── assets/shells/      # tracked printable shell halves
-│   ├── obsolete/           # historical code retained for reference
-│   ├── run_pipeline.py     # command-line entry point
-│   └── run_gui.py          # graphical entry point
-├── pyCoilGen/              # vendored coil-layout engine
-├── data/                   # runtime data searched by pyCoilGen
-├── tests/                  # automated regression tests for pyCoilGen
-├── GradientDesign.bat      # Windows one-click setup and GUI launcher
-├── requirements-project.txt
-└── pyproject.toml
-```
+## Installation and verification
 
-Simulation outputs are written under `halbach_coils/resultados/`. They are deliberately ignored by Git so that a run never changes the source history or adds large generated files to a commit.
+Windows is the supported desktop workflow. The package declares
+`>=3.11,!=3.14.1,<3.15`; the launcher tries 3.14, 3.13, 3.12 and 3.11 in that
+order, then a compatible `python` on `PATH`. Other operating systems have not
+been validated as complete application workflows.
 
-## Coordinate system: read before changing physics
-
-Select `B0` from the top menu: `+X`, `-X`, `+Y`, `-Y`, `+Z`, or `-Z`.
-The default is `+Y`. The optimized field is the signed component `B · B0_hat`;
-`Gx`, `Gy`, and `Gz` are its derivatives along physical X, Y, and Z.
-The bore points along physical `+Z`. The ROI, wire STL, field plots, and 3D
-preview use this same frame. Changing B0 does not rotate the cylinder or ROI.
-
-This corrects the previous axis permutation, which labeled the field as Y
-while the engine optimized Bz. New and old designs can therefore differ even
-when their names match. See [the frame contract](docs/B0_FRAME.md).
-
-## Field results and advanced parameters
-
-Completed gradient designs save three PNG plots and a `*_field_data.npz` file:
-objective versus generated field at 1 A, linearity with residuals, and spatial
-field/error samples in the ROI. Pipeline and wire runs open the interactive
-viewer automatically. Use **Results > Open field plots...** to reopen a result;
-its saved B0 direction is independent of the current menu selection.
-Wire-only results describe the CoilGen conductor. After successful lead creation,
-the pipeline recalculates the field and electrical metrics from the retained coil
-and both terminal leads. Final plots identify this stage explicitly; external
-power-supply and return wiring are outside the model.
-
-**Advanced CoilGen parameters > Show more parameters** exposes mesh and ROI
-sampling, contour and connection controls, integration, and optimizer settings.
-Hover over a label or value for its meaning, units, and effects, in the selected
-language. Expanding the Pipeline controls shows a reduced mesh/ROI preview;
-the numerical summary gives the full sample counts. Changes to the field or
-winding require running a new design. Hiding the controls preserves their values,
-and **Restore defaults** resets only these advanced settings. The main geometry,
-material, and B0 selection are preserved. The 3D views support mouse-wheel zoom.
-
-## Requirements
-
-- Windows with 64-bit CPython **3.11, 3.12, 3.13, or 3.14**. Python 3.14.1 is excluded because NetworkX does not support that interpreter patch release; use the newest available 3.14 patch instead.
-- A working C/C++-free Python installation; the pinned dependency set provides Windows wheels for every supported version.
-- FastHenry2 only if resistance and inductance metrics are needed. The pipeline remains usable without it and reports those values as `n/a`.
-
-The supported range is declared in `pyproject.toml` and exercised by the Windows compatibility workflow. Versions outside that range are rejected rather than installed with an untested dependency combination.
-
-## Installation
-
-### One-click setup and launch on Windows
-
-Install any supported 64-bit Python version first, then clone or extract the complete
-repository. Double-click `GradientDesign.bat` in the repository root.
-
-On its first run, the launcher:
-
-1. Uses the newest compatible interpreter available through the Windows Python Launcher, in the order 3.14, 3.13, 3.12, then 3.11. If the launcher is unavailable, it accepts a compatible `python` on `PATH`.
-2. Creates or repairs `.venv`.
-3. Installs and verifies every dependency in `requirements-project.txt`.
-4. Opens the GUI.
-
-Later launches skip installation when the environment passes its dependency
-check and open the GUI directly. If setup fails, the window remains open with
-the error and the next launch retries it. The launcher never installs Python
-itself or modifies a global Python environment.
-
-### Manual installation
-
-From the repository root:
+For manual installation, run from the repository root:
 
 ```powershell
 py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements-project.txt
-```
-
-Replace `3.14` with `3.13`, `3.12`, or `3.11` when that is the interpreter you want to use. A virtual environment remains tied to the Python installation that created it; the launcher recreates an incompatible or broken environment automatically.
-
-`requirements-project.txt` installs the local `pyCoilGen` package in editable mode and all application dependencies. This includes `networkx`, `rtree`, and `scikit-image`: they are optional `trimesh` extras, but this pipeline uses them for mesh component splitting, spatial queries, and voxel remeshing respectively. `pytest` is included for verification.
-
-The commands deliberately call `.\.venv\Scripts\python.exe` directly. This
-avoids relying on PowerShell activation or on whichever global `python` happens
-to be on the system PATH.
-
-### Resetting the virtual environment
-
-From the repository root, close the GUI and any terminals or Python processes using the environment. Then run the following in a new PowerShell window. It removes only the repository's `.venv` directory and recreates it from the declared dependencies:
-
-```powershell
-Remove-Item -LiteralPath .venv -Recurse -Force
-py -3.14 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -r requirements-project.txt
-```
-
-If `Remove-Item` reports that a file is in use, close the process named in the message and rerun the command. Do not delete the repository root—only `.venv`.
-
-To confirm the installation:
-
-```powershell
-.\.venv\Scripts\python.exe -c "import networkx, rtree; from skimage import measure; import trimesh; print('Runtime dependencies OK')"
 .\.venv\Scripts\python.exe -m pip check
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-The full test count changes as coverage is added. Deprecation warnings from
-third-party readers may appear; a warning is not a failure unless pytest reports
-a failed test.
+Replace `3.14` with your supported interpreter version. `requirements-project.txt`
+installs this checkout in editable mode with test tools. Runtime versions are
+pinned once in [pyproject.toml](pyproject.toml), including the `trimesh` extras
+`networkx`, `rtree` and `scikit-image` used by the application. The test count can
+change; the command's final result gives the current status.
 
-## Running the application
+If the environment is broken, close the GUI and processes using `.venv`, rename
+that directory to `.venv.old`, then launch `AutoGrad.bat` to create a new
+one. Remove the backup when no longer needed.
 
-Run the application commands from the repository root. Always use the virtual
-environment executable so the GUI cannot start with a global Python missing the
-project dependencies:
+### FastHenry2 (optional)
+
+FastHenry2 supplies additional resistance and inductance estimates. It is not
+included. Without a working installation, those solver values remain unavailable
+and geometry generation can still run. The resolver checks
+`Config.fasthenry.bin_path`, `PATH`, then existing known Windows installation paths.
+
+Final metrics distinguish analytical `R = ρL/A` from FastHenry R/L and record
+solver status. The electrical model uses the real cable area; FastHenry uses an
+equal-area square approximation. External supply/return wiring and mutual
+inductance between gradients are outside this model. See
+[outputs and FastHenry](docs/OUTPUTS_AND_FASTHENRY.md).
+
+## Running from a terminal
+
+Run from the repository root with the project interpreter:
 
 ```powershell
 .\.venv\Scripts\python.exe halbach_coils\run_gui.py
+.\.venv\Scripts\python.exe halbach_coils\run_pipeline.py --help
 ```
 
-The GUI opens in English. Select **Settings > Language > Español** to switch the
-entire interface to Spanish; select **English** to switch back. The setting is
-applied immediately and intentionally starts from English on every launch.
-
-All dimensions entered in the GUI are millimetres. The application converts
-them to metres for `Config` and `pyCoilGen` internally.
-
-The Pipeline, Batch design, and Tikhonov sweep panels let you select Cu, Al,
-or Ag conductor material. They fill the corresponding room-temperature
-resistivity in ohm.m; choose **Custom** to enter a different material or
-temperature-adjusted value. The resistivity is used by both pyCoilGen's ohmic
-estimate and FastHenry.
-
-The real cable diameter is electrically independent from the groove profile.
-For example, a 2 mm round cable with a 4 mm radial groove height and 2 mm
-groove width produces an elliptical subtraction solid, while resistance still
-uses the real circular area (3.1416 mm²). FastHenry uses an equal-area square
-approximation because its segment primitive is rectangular. Metrics record the
-real area, groove area, and their ratio for traceability.
-
-The GUI has three modes:
-
-- **Pipeline** runs gradient generation, lead creation, and shell cutting in
-  sequence. Choose an autogenerated one-piece cylinder or a tracked two-half
-  STL pair from `halbach_coils/assets/shells`. The preview warns when the ROI
-  does not fit inside the bore. Clear a step checkbox only when intentionally
-  reusing an existing intermediate result.
-- **Batch design** creates Gx, Gy, and Gz sequentially in a common physical
-  frame. Choose the innermost complete gradient's inner radius or the outermost
-  gradient's outer radius, the shared height and ROI, and a gap between gradients.
-  These radii include the former, exposed cable, and groove envelope. Each axis
-  has its own cable diameter, crossing-layer gap, Tikhonov factor, and number
-  of levels. The cable and crossing settings determine each wall thickness
-  using the same formula as Pipeline. All six complete gradient radii are calculated;
-  the preview shows the plastic mold radii separately.
-  The initial nesting order is Gz → Gx → Gy and can be changed.
-- **Tikhonov sweep** evaluates a logarithmic coarse range and, optionally, a
-  fine range around promising values. It displays the samples and writes CSV
-  and text summaries to the selected output directory.
-
-Each sweep writes `Sweep_Config.json` beside its CSV: use **Load previous
-CSV...**, select any result row, and choose **Use selected in Pipeline** to
-restore the sweep geometry/material parameters with that row's Tikhonov value.
-
-The log at the bottom of each mode shows progress and the exact failure if a
-run cannot finish. **Stop** terminates the calculation process and its child
-processes; the three panels share one active job. Cancelled runs keep their
-partial files and a `.job_status.json` marker. Closing the GUI also cancels its
-active job.
-
-For a non-interactive run:
+For example, generate a wire layout without terminal or mould stages:
 
 ```powershell
-.\.venv\Scripts\python.exe halbach_coils\run_pipeline.py --axis y --tikhonov 2500 --levels 26 --layer 2
-.\.venv\Scripts\python.exe halbach_coils\run_pipeline.py --axis z --tikhonov 10000 --layer 3
+.\.venv\Scripts\python.exe halbach_coils\run_pipeline.py --axis y --b0=+y --radius 0.039 --height 0.170 --tikhonov 2500 --levels 12 --skip-leads --skip-shell --no-plots
 ```
 
-Useful options include:
+CLI lengths are **metres**; GUI lengths are **millimetres**. Their defaults are
+not identical: specify geometry explicitly when comparing runs. A negative B₀
+direction uses the equals form, for example `--b0=-y`.
 
-```text
---no-plots                  Run without interactive plots.
---skip-gradient             Reuse an existing wire STL.
---skip-leads --skip-shell   Generate only the wire layout.
---no-overlap-warn           Disable the multi-wire congestion warning.
-```
-
-Each pipeline run uses a unique directory such as `resultados/pipeline/Gy_tk2500_lvl26/`; repeated runs receive a numeric suffix instead of overwriting prior results.
-
-### Inputs and outputs
-
-Tracked shell inputs belong in `halbach_coils/assets/shells/` as matching
-`g_Na.stl` and `g_Nb.stl` halves. The GUI discovers matching pairs at startup.
-Do not put generated results in this directory.
-
-Run directories contain the available intermediate and final STLs plus metrics
-and diagnostic files. Their exact contents depend on the selected steps. Keep
-the full run directory when comparing designs: the final shell alone does not
-record every parameter or diagnostic needed to reproduce the run.
-
-Completed individual Pipeline runs are arranged by stage:
-
-```text
-output/
-├── Resumen.txt       # final field/electrical values, including FastHenry R/L
-├── Molde/            # manufactured shell STL(s)
-├── Leads/            # final conductor, terminals, final metrics and field data
-├── Graficos/         # final PNGs; CoilGen/ holds pre-lead plots
-├── Bobina/           # original wire and matching provenance/reference files
-└── Diagnostico/      # solver inputs, raw results and other diagnostics
-```
-
-The completion dialog and final field viewer also display FastHenry resistance
-and inductance. `Bobina/*_metrics.txt` describes the wire **before terminal
-leads** and does not contain the final solver values. Use `Resumen.txt` or
-`Leads/*_final_metrics.json` for those. File pickers and reuse also support older
-flat output directories. See [output and FastHenry verification](docs/SALIDAS_Y_FASTHENRY.md).
-
-Batch results retain this organization inside `01_Gz/`, `02_Gx/`, and
-`03_Gy/` (or the selected order), with `Resumen_lote.txt` and `lote.json`
-at the top level. A successful set adds `Conjunto/` containing the three
-assembly molds, a colored GLB scene, and the measured key/interference report.
-Use the STLs in `Conjunto/` for the assembled molds. Individual layer folders
-keep the original pipeline outputs and final field/electrical results.
-
-Assembly keys use a tab on the inner mold and an open-ended slot in the next
-mold, entering from −Z. The initial dimensions are 4 mm width and axial length,
-with 0.1 mm clearance on each tangential side and at the axial stop. Key
-placement is checked against the generated conductors and neighboring molds;
-if the preferred angular station is occupied, another station is tried without
-rotating the gradients. There is no antenna recess. The initial preview shows
-provisional key positions until the final geometry has been checked.
-
-The gap is `inner radius of the outer gradient - outer radius of the inner
-gradient`, including the exposed cable and groove envelope. Zero is allowed;
-negative values are rejected before calculation. Plastic faces are derived
-inside each complete gradient's radial extent. Completion
-requires checking the actual three-dimensional conductors and molds, including
-interference between layers and terminal leads.
-Failures and cancellation retain completed individual designs and mark the
-batch as incomplete.
-See [batch dimensions and assembly verification](docs/LOTE_Y_ENCAJES.md) for
-the radius formulas, reference measurements, and tested set.
-
-## Configuration and pipeline stages
-
-`halbach_coils/coilgen/config.py` is the single source of truth for geometry, conductor, target field, lead-wire, shell, and FastHenry settings. Avoid duplicating configuration values in scripts.
-
-| Module | Responsibility |
+| CLI option | Meaning |
 | --- | --- |
-| `coilgen.gradient` | prepares pyCoilGen arguments, runs optimisation, extracts field metrics |
-| `coilgen.overlap` | groups pyCoilGen crossings and detects 3+ cables in one zone |
-| `coilgen.leads` | creates and joins lead wires |
-| `coilgen.shell` | produces the grooved shell geometry |
-| `coilgen.sweep` | runs Tikhonov parameter studies |
-| `coilgen.metrics` | records slope, RMSE, relative error, and electrical values |
-| `coilgen.fasthenry` | resolves an optional FastHenry2 executable |
+| `--axis x\|y\|z` | Physical gradient axis. |
+| `--b0=+y` | Signed main-field direction; all six axis directions are supported. |
+| `--output-dir PATH` | Output location; otherwise a new run directory is created under `halbach_coils/results/pipeline/`. |
+| `--no-plots` | Disable interactive plots. |
+| `--skip-gradient` | Reuse a compatible wire and its provenance sidecars. |
+| `--skip-leads`, `--skip-shell` | Omit the corresponding stage. |
+| `--no-b0-marker` | Disable the mould orientation marks enabled by the CLI. |
 
-Lead wires exit along the bore (by default toward `-Z`). Their angular station
-is configured per gradient axis. The planner preserves the original groove
-sections and requires a route that satisfies curvature and clearance checks.
-If no route is feasible it reports an error. For the default B0=Y, Gz uses
-the terminal corridor near X. Both the formerly rejected Gz case and the GUI
-defaults were verified through the complete workflow; see
-[the Gz and cancellation report](docs/CIERRE_GZ_Y_CANCELACION.md).
+## Coordinates and units
 
-Reusing a wire requires its matching `*_design.json`, field data, and lead
-reference sidecars. The application checks the saved configuration and file
-hashes. Regenerate older designs that lack this information. Normal application
-runs retain compact result files instead of serializing the engine's full
-intermediate matrices.
+The default bore axis is physical **+Z** and the default main-field direction is
+**B₀ = +Y**. The optimised component is signed `B_parallel = B · B0_hat`:
+`Gx = d(B_parallel)/dx`, `Gy = d(B_parallel)/dy` and `Gz = d(B_parallel)/dz`.
+Changing B₀ does not rotate the cylinder or the ROI. Meshes, fields, STL exports
+and previews use the same physical XYZ frame.
 
-## FastHenry2
+Earlier versions used a different axis mapping and optimised Bz. Compare older
+designs using their saved configuration and component, not their Gx/Gy/Gz name
+alone. See the [coordinate-frame contract](docs/B0_FRAME.md).
 
-FastHenry2 is optional. The resolver checks, in order:
+GUI dimensions and default STL exports use mm; internal geometry and CLI
+lengths use m. STL has no unit metadata: declare units when importing custom
+shells or reading exports. GLB assembly scenes use metres.
 
-1. A path configured in `Config.fasthenry.bin_path`.
-2. An executable available on `PATH` (`FastHenry2.exe`, `fasthenry.exe`, `fasthenry2`, or `fasthenry`).
-3. The standard and historical Windows installation paths, only if they exist.
+## Inputs and outputs
 
-After lead creation the application evaluates the final conductor. It records
-the analytical resistance separately from optional FastHenry R/L. If extraction
-is unavailable or fails, solver values remain empty with an explicit status.
-Windows FastHenry runs in an owned hidden automation process, contained in a
-kill-on-close Windows job. Timeout, Stop, or worker termination closes that
-server even when COM is unresponsive. A pre-existing FastHenry instance is
-preserved and reported as unavailable for this run. Normal extraction, a
-deliberately frozen server, and cancellation were tested on the installed
-solver; see [the verification report](docs/CIERRE_GZ_Y_CANCELACION.md).
+Reusable shell inputs live in `halbach_coils/assets/shells/`, as matching
+`g_Na.stl` / `g_Nb.stl` halves. The GUI discovers pairs at startup and can also
+generate a one-piece cylindrical former. The [application README](halbach_coils/README.md)
+details shell selection, B₀ marks, advanced controls and the batch workflow.
 
-## pyCoilGen integration notes
+Generated results normally live under `halbach_coils/results/` and are ignored
+by Git. Use an output directory outside the source tree for long studies. Custom
+output paths inside the repository must also be reviewed before committing.
 
-The local engine is intentionally part of this repository because the Halbach workflow relies on it directly. When changing the interface between the application and the engine:
+New results use the GUI language selected when the job starts. The English layout
+is shown below; Spanish sessions use localized folder and summary names. Existing
+results keep their original names when reopened in either language. Command-line
+and Python runs default to English. See [output language and compatibility](docs/OUTPUT_LAYOUT.md).
 
-- Every argument passed to `pyCoilGen(log, arg_dict)` must be registered in `pyCoilGen/sub_functions/parse_input.py` or by the relevant plugin.
-- `smooth_flag` is not a valid pyCoilGen argument; smoothing is controlled by `smooth_factor`.
-- A `target_field_definition_file` takes precedence over `field_shape_function`.
-- Preserve the GPL licence and upstream attribution when redistributing modifications.
+A completed individual Pipeline run uses this layout:
 
-## Development workflow
+```text
+run/
+├── Summary.txt       # Final field/electrical summary and FastHenry status
+├── Mold/             # Manufacturing shell STL(s)
+├── Leads/            # Final conductor, terminal paths, field data and metrics
+├── Plots/            # Final PNG plots; CoilGen/ holds pre-lead plots
+├── Coil/             # Original wire and configuration/reference sidecars
+└── Diagnostics/      # Solver inputs, raw results and diagnostics
+```
 
-1. Start from a clean Git branch.
-2. Run the test suite before and after changes to `pyCoilGen` or shared geometry code.
-3. Use a deliberately named output directory for physics experiments, and retain the resulting metrics outside Git when needed.
-4. Record coordinate-frame assumptions and units in code comments and commits.
-5. Keep `obsolete/` read-only unless a historical path has been independently reproduced by the current pipeline.
+Keep the complete run folder to reproduce or reuse a design. Configuration and
+sidecar hashes are checked; older wires without provenance must be regenerated.
+`Coil/*_metrics.txt` describes the wire **before leads**; read `Summary.txt` or
+`Leads/*_final_metrics.json` for final values.
 
-### GUI translations
+Batch runs add `Batch_summary.txt`, `batch.json` and numbered layer directories
+in the selected order (initially Gz → Gx → Gy). Only a successful final geometry
+check publishes `Assembly/`, containing assembly mould STLs, `Gradients.glb`
+and `keys.json`. Use those STLs for assembly. See
+[batch dimensions and keys](docs/BATCH_AND_ASSEMBLY.md).
 
-English is the source language for GUI code. Spanish translations are kept in
-`halbach_coils/gui/i18n.py`. When adding user-visible text, write the English
-source string first and add its Spanish equivalent to `TRANSLATIONS`; use
-`root.tr(...)` for text created dynamically in dialogs, errors, plots, or
-status updates. This keeps missing translations readable instead of displaying
-an opaque key.
+Field viewers open after completed designs. Reopen data with **Results > Open
+field plots...**; B₀ comes from the saved result. Sweeps save CSV/text summaries
+and `Sweep_Config.json`; **Load previous CSV...** and **Use selected in Pipeline**
+restore the study parameters with the chosen Tikhonov factor.
 
-### Troubleshooting
+## Repository guide
 
-- **The batch file says Python is missing:** install a supported 64-bit Python
-  version and rerun it. Python 3.14.1 is specifically excluded.
-- **The virtual environment is broken or uses an old interpreter:** follow
-  **Resetting the virtual environment** above. This is safe for generated
-  results because only `.venv` is removed.
-- **The GUI closes immediately when started manually:** run the documented
-  `python.exe halbach_coils\run_gui.py` command from PowerShell so the traceback
-  remains visible.
-- **FastHenry values show `n/a`:** install FastHenry2 or configure its path if
-  electrical extraction is required. Geometry generation is still available.
-- **A custom shell pair is not listed:** confirm both halves follow the
-  `g_Na.stl` / `g_Nb.stl` naming pattern and restart the GUI.
+```text
+AutoGrad/
+├── AutoGrad.bat       # Windows setup and GUI launcher
+├── halbach_coils/           # Supported application
+│   ├── coilgen/            # Configuration, pipeline, geometry and metrics
+│   ├── gui/                # Tkinter GUI and English/Spanish translations
+│   ├── assets/shells/      # Reusable input STL halves
+│   ├── run_gui.py
+│   └── run_pipeline.py
+├── pyCoilGen/              # Included, locally modified optimisation engine
+├── data/                   # Curated engine inputs and regression meshes
+├── tests/                  # Application/engine tests and fixtures
+├── docs/                   # Technical guides, validation and publication
+├── requirements-project.txt
+├── pyproject.toml          # Metadata and pinned dependencies
+└── LICENSE.txt
+```
 
-## Licence and redistribution
+Local environments, results, experimental scripts, archives, backups and retired
+application code are excluded from the publication branch. Required STL/NumPy
+inputs remain versioned through explicit `.gitignore` exceptions. See
+[contributing](CONTRIBUTING.md) and the [publication guide](docs/PUBLICATION.md).
 
-The repository is distributed under the GNU General Public License v3 or later;
-see `LICENSE.txt`. The vendored `pyCoilGen` engine retains its upstream authorship
-and GPL obligations. Contributions and redistributed versions must preserve the
-licence and relevant attribution.
+## Troubleshooting
 
-## Project history
+- **Python is not found:** install a supported 64-bit interpreter and rerun the launcher.
+- **Manual launch closes immediately:** use the terminal command above to retain the traceback.
+- **A shell pair is missing:** check both filenames and restart the GUI.
+- **FastHenry shows `n/a`:** inspect solver status and configure its executable if needed.
+- **A design reports collisions or fails assembly:** inspect its report and revise the winding parameters; a completed wire optimisation alone does not establish manufacturability.
 
-The Halbach application was previously stored in a folder named `pruebas/` and versioned separately from `pyCoilGen`. The current self-contained layout preserves that Git history while making a fresh clone directly installable.
+## Licence and upstream attribution
+
+Distributed under the **GNU GPL v3 or later**; see [LICENSE.txt](LICENSE.txt).
+The engine derives from [kev-m/pyCoilGen](https://github.com/kev-m/pyCoilGen) and
+retains its upstream authorship. The [upstream documentation](https://pycoilgen.readthedocs.io/)
+describes the general engine; this repository's guides cover the Halbach
+application and local modifications. Preserve the licence and attribution when
+redistributing either part.

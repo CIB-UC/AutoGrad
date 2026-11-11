@@ -28,6 +28,18 @@ def test_simplification_preserves_direction_endpoints_and_error_bound():
     assert distances.max() <= tolerance * (1 + 1e-10)
 
 
+def test_zero_tolerance_retains_the_exact_path_and_known_terminal_length(tmp_path):
+    path = np.array([[0.,0,0],[.1,0,0],[.1,.5,0],[.5,.5,0]])
+    np.testing.assert_array_equal(electrical.simplify_current_path(path, 0), path)
+    cfg = Config()
+    cfg.fasthenry.enabled = False
+    result = electrical.evaluate_final_electrical(cfg, path, tmp_path, tolerance=0)
+    assert result['original_length_m'] == pytest.approx(1.)
+    assert result['analytic_resistance_ohm'] == pytest.approx(0.005347606087887683)
+    assert result['solver_analytic_resistance_ohm'] == result['analytic_resistance_ohm']
+    assert result['conductivity_S_per_m'] == pytest.approx(1/1.68e-8)
+
+
 def test_disabled_solver_preserves_analytic_resistance_without_fake_inductance(tmp_path):
     cfg = Config()
     cfg.fasthenry.enabled = False

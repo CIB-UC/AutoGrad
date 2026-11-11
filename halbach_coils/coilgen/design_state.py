@@ -37,6 +37,11 @@ def _config_snapshot(cfg) -> dict:
     winding = asdict(cfg.winding)
     # This legacy multiplier is ignored by the current normal-shift formula.
     winding.pop('normal_shift_height_factor', None)
+    advanced = asdict(cfg.advanced)
+    # Missing in existing schema-v2 sidecars means the historical auto route.
+    # Keep their signatures identical; the high route is a real design change.
+    if advanced.get('connection_cut_side') == 'auto':
+        advanced.pop('connection_cut_side')
     return _json_value({
         'gradient_axis': cfg.gradient_axis.lower(),
         'b0_direction': cfg.b0_direction.strip().lower(),
@@ -46,7 +51,7 @@ def _config_snapshot(cfg) -> dict:
         'cylinder': asdict(cfg.cylinder),
         'winding': winding,
         'wire': asdict(cfg.wire),
-        'advanced': asdict(cfg.advanced),
+        'advanced': advanced,
         'resistivity_ohm_m': cfg.fasthenry.specific_conductivity,
         'derived_geometry': {
             'cylinder_design_radius_m': cfg.cylinder_design_radius,

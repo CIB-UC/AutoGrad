@@ -18,7 +18,8 @@ def electrical_cross_section_area(input_args, swept_area: float) -> float:
     return configured if configured > 0 else swept_area
 
 
-def create_sweep_along_surface(coil_parts: List[CoilPart], input_args) -> List[CoilPart]:
+def create_sweep_along_surface(coil_parts: List[CoilPart], input_args, *,
+                               validation_only=False, prepared=False) -> List[CoilPart]:
     """
     Create a volumetric coil body by surface sweep.
 
@@ -153,22 +154,35 @@ def create_sweep_along_surface(coil_parts: List[CoilPart], input_args) -> List[C
             cross_section_radius = np.max(np.linalg.norm(
                 cross_section_points - cross_section_center[:, np.newaxis], axis=0))
 
-            # Remove repeating entries
-            diff_norm = np.linalg.norm(np.diff(wire_path.v, axis=1), axis=0)
-            repeat_point_indices = np.where(diff_norm == 0)[0]
-            wire_path.v = np.delete(wire_path.v, repeat_point_indices, axis=1)
-            wire_path.uv = np.delete(wire_path.uv, repeat_point_indices, axis=1)
-
-            # Open the track if it's not already opened
-            diff2_arr = wire_path.v[:, -1][:, np.newaxis] - wire_path.v
-            diff2_norm = np.linalg.norm(diff2_arr, axis=0)
-            arr2 = (diff2_norm < cross_section_radius / 2).astype(int)
-            point_inds_to_delete = np.where(diff2_norm < cross_section_radius / 2)[0]
-
-            point_inds_to_delete = point_inds_to_delete[:round(len(point_inds_to_delete) / 2)]
-
-            wire_path.v = np.delete(wire_path.v, point_inds_to_delete, axis=1)
-            wire_path.uv = np.delete(wire_path.uv, point_inds_to_delete, axis=1)
+            if not prepared:
+                # Prune once. Validation probes use this exact resulting path;
+                # an accepted probe must not lose more stations during sweeping.
+                diff_norm = np.linalg.norm(np.diff(wire_path.v, axis=1), axis=0)
+                repeat_point_indices = np.where(diff_norm == 0)[0]
+                wire_path.v = np.delete(wire_path.v, repeat_point_indices, axis=1)
+                wire_path.uv = np.delete(wire_path.uv, repeat_point_indices, axis=1)
+                diff2_norm = np.linalg.norm(wire_path.v[:, -1][:, None]-wire_path.v, axis=0)
+                point_inds_to_delete = np.where(diff2_norm < cross_section_radius / 2)[0]
+                point_inds_to_delete = point_inds_to_delete[:round(len(point_inds_to_delete) / 2)]
+                wire_path.v = np.delete(wire_path.v, point_inds_to_delete, axis=1)
+                wire_path.uv = np.delete(wire_path.uv, point_inds_to_delete, axis=1)
+                trace = getattr(coil_part, 'return_path_trace', None)
+                if trace is not None:
+                    trace['pruned_v'] = wire_path.v.copy()
+                    trace['pruned_uv'] = wire_path.uv.copy()
+                from .wire_clearance import ensure_wire_clearance
+                ensure_wire_clearance(coil_part, input_args)
+                if trace is not None:
+                    trace['recovered_v'] = wire_path.v.copy()
+                    trace['recovered_uv'] = wire_path.uv.copy()
+                if getattr(coil_part, 'clearance_report', {}).get('status') == 'repaired':
+                    log.info('Recovered wire clearance: maximum adjustment %.4g mm.',
+                             coil_part.clearance_report['max_displacement_mm'])
+            wire_path.v_length = np.linalg.norm(np.diff(wire_path.v, axis=1), axis=0).sum()
+            ohmian_resistance = wire_path.v_length * conductor_resistivity / resistance_area
+            if validation_only:
+                coil_part.ohmian_resistance = ohmian_resistance
+                continue
 
             # Calculate the normal vectors along the wire track
             surface_normal_along_wire_path_v = np.zeros((3, wire_path.v.shape[1]))  # MATLAB shape

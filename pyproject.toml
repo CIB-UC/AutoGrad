@@ -61,13 +61,13 @@ test = [
 ]
 
 [project.urls]
-Home = "https://github.com/kev-m/pyCoilGen"
-Documentation = "https://pycoilgen.readthedocs.io/"
-Source = "https://github.com/kev-m/pyCoilGen"
-"Code of Conduct" = "https://github.com/kev-m/pyCoilGen/blob/release/CODE_OF_CONDUCT.md"
-"Bug tracker" = "https://github.com/kev-m/pyCoilGen/issues"
-Changelog = "https://github.com/kev-m/pyCoilGen/blob/release/CHANGELOG.md"
-Contributing = "https://github.com/kev-m/pyCoilGen/blob/release/CONTRIBUTING.md"
+Home = "https://github.com/CIB-UC/Gradients-PyCoilGen"
+Documentation = "https://github.com/CIB-UC/Gradients-PyCoilGen/blob/main/README.md"
+Source = "https://github.com/CIB-UC/Gradients-PyCoilGen"
+"Bug tracker" = "https://github.com/CIB-UC/Gradients-PyCoilGen/issues"
+Contributing = "https://github.com/CIB-UC/Gradients-PyCoilGen/blob/main/CONTRIBUTING.md"
+"Upstream engine" = "https://github.com/kev-m/pyCoilGen"
+"Upstream documentation" = "https://pycoilgen.readthedocs.io/"
 
 [project.scripts]
 pyCoilGen = "pyCoilGen:__main__.main"

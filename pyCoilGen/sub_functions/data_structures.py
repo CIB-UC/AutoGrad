@@ -194,7 +194,7 @@ class Mesh:
         # Tweak: Re-order the first entry, lowest first
         connections[0] = sorted(connections[0])
 
-        # Use ChatGPT to reduce connections to lists of connected vertices
+        # Reduce connections to lists of connected vertices.
         adj_dict = {}
         for conn in connections:
             for vertex in conn:

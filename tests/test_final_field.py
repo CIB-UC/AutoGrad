@@ -56,6 +56,19 @@ def test_final_current_path_rejects_modified_conductor_stl(tmp_path):
         evaluate_final_conductor(cfg, wire, final, tmp_path)
 
 
+def test_final_current_path_rejects_real_self_interference(tmp_path):
+    cfg, wire, final, *_ = setup_circuit(tmp_path)
+    filename = current_path_path(final)
+    with np.load(filename, allow_pickle=False) as saved:
+        arrays = {key:saved[key] for key in saved.files}
+    arrays['path'] = np.array([[-.01,0,0],[.01,0,0],[.01,.02,0],
+                               [0,.02,.001],[0,-.01,.001]])
+    np.savez_compressed(filename, **arrays)
+    with pytest.raises(ValueError, match='Final round conductor interferes with itself'):
+        evaluate_final_conductor(cfg, wire, final, tmp_path)
+    assert not list(tmp_path.glob('*_final_metrics.json'))
+
+
 def test_biot_savart_batches_equal_unbatched_reference():
     from types import SimpleNamespace
     from pyCoilGen.sub_functions.process_raw_loops import biot_savart_calc_b

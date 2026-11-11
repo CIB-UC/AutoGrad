@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+from pyCoilGen.helpers.wire_geometry import WireInterferenceError
 
 from .design_state import validate_design_state
 from .field_plots import FieldPlotData, load_field_data, save_plot_data
@@ -45,7 +47,7 @@ def field_at_points(path, coords):
     return field
 
 
-def evaluate_final_conductor(cfg, wire_stl, with_leads_stl, output_dir):
+def evaluate_final_conductor(cfg, wire_stl, with_leads_stl, output_dir, *, electrical_lock=None):
     """Persist field plots and electrical metrics for the real final conductor."""
     from pyCoilGen.sub_functions.evaluate_field_errors import optimal_layout_current
     from .final_electrical import evaluate_final_electrical
@@ -67,6 +69,14 @@ def evaluate_final_conductor(cfg, wire_stl, with_leads_stl, output_dir):
                 or data.gradient_axis != cfg.gradient_axis):
             raise ValueError('Final conductor and target have different B0 or gradient axes.')
         path = np.asarray(saved['path'], dtype=float)
+    from .overlap import wire_contact_pairs
+    i, j, distances, _ = wire_contact_pairs(path, cfg.wire.conductor_width, closed=False)
+    if len(i):
+        worst = int(np.argmin(distances))
+        raise WireInterferenceError(f'Final round conductor interferes with itself: segments '
+                         f'{i[worst]} / {j[worst]}, centerline distance '
+                         f'{distances[worst]*1000:.6g} mm < '
+                         f'{cfg.wire.conductor_width*1000:.6g} mm wire diameter.')
     generated = b0_unit_vector(cfg.b0_direction) @ field_at_points(path, data.coords_m) * 1000
     final_data = FieldPlotData(data.coords_m, generated, data.target_mT_per_A,
                                data.gradient_axis, data.b0_direction,
@@ -77,14 +87,20 @@ def evaluate_final_conductor(cfg, wire_stl, with_leads_stl, output_dir):
     target_scale = float(np.max(np.abs(data.target_mT_per_A)))
     error = np.abs(generated - data.target_mT_per_A)
     ideal_current = optimal_layout_current(data.target_mT_per_A, generated)
-    electrical = evaluate_final_electrical(cfg, path, output_dir)
+    # Parallel batch workers share the Windows FastHenry COM server. Field
+    # evaluation stays parallel; only the electrical solver owns this lock.
+    with electrical_lock if electrical_lock is not None else nullcontext():
+        electrical = evaluate_final_electrical(cfg, path, output_dir)
     result = {
         'circuit_stage': 'final', 'coordinate_frame': 'physical_xyz',
         'b0_direction': cfg.b0_direction, 'gradient_axis': cfg.gradient_axis,
         'supply_return_included': False,
         'current_path': str(Path(current_path_path(with_leads_stl)).resolve()),
         'wire_length_m': length,
-        'resistance_ohm_analytic': cfg.fasthenry.specific_conductivity * length / cfg.electrical_cross_section_area,
+        'self_interference_check': 'passed_exact_nonlocal_segment_distances',
+        'conductor_area_m2': cfg.electrical_cross_section_area,
+        'conductor_resistivity_ohm_m': cfg.fasthenry.resistivity_ohm_m,
+        'resistance_ohm_analytic': cfg.fasthenry.resistivity_ohm_m * length / cfg.electrical_cross_section_area,
         'slope_mT_per_m_per_A': float(slope), 'residual_rms_mT_per_A': float(rms),
         'mean_target_error_pct': float(np.mean(error) / target_scale * 100) if target_scale else None,
         'max_target_error_pct': float(np.max(error) / target_scale * 100) if target_scale else None,

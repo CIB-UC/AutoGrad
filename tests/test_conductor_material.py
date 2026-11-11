@@ -43,6 +43,55 @@ def test_default_material_is_copper_with_matching_resistivity():
     )
 
 
+def test_explicit_si_names_preserve_legacy_configuration():
+    cfg = Config()
+    cfg.fasthenry.resistivity_ohm_m = 2.82e-8
+    assert cfg.fasthenry.specific_conductivity == 2.82e-8
+    assert cfg.fasthenry.conductivity_s_per_m == pytest.approx(1 / 2.82e-8)
+    params = cfg.to_params_dict()
+    assert params['conductor_resistivity_ohm_m'] == 2.82e-8
+    assert params['conductor_conductivity_S_per_m'] == pytest.approx(1 / 2.82e-8)
+
+
+@pytest.mark.parametrize('groove_factor', [1., 2., 3.])
+def test_real_surface_sweep_one_metre_wire_has_known_resistance(groove_factor):
+    from pyCoilGen.sub_functions.create_sweep_along_surface import create_sweep_along_surface
+    from pyCoilGen.sub_functions.data_structures import Mesh
+    mesh = Mesh(vertices=np.array([[-1.,-1.,0.],[2.,-1.,0.],[-1.,2.,0.]]),
+                faces=np.array([[0,1,2]]))
+    mesh.uv = mesh.get_vertices()[:,:2]
+    mesh.fn = np.array([[0.,0.,1.]])
+    cfg = Config()
+    cfg.wire.cross_section_a_frac = groove_factor
+    args = SimpleNamespace(skip_sweep=False, cross_sectional_points=cfg.cross_sectional_points,
+                           conductor_cross_section_area=math.pi*1e-6,
+                           specific_conductivity_conductor=1.68e-8)
+    part = SimpleNamespace(coil_mesh=mesh, wire_path=SimpleNamespace(
+        v=np.array([[0.,.5,1.],[0.,0.,0.],[0.,0.,0.]]),
+        uv=np.array([[0.,.5,1.],[0.,0.,0.]])))
+    create_sweep_along_surface([part], args)
+    assert part.ohmian_resistance == pytest.approx(0.005347606087887683)
+
+
+def test_resistance_matrix_material_factor_is_rho_over_thickness():
+    from pyCoilGen.sub_functions.calculate_resistance_matrix import calculate_resistance_matrix
+    from pyCoilGen.sub_functions.data_structures import Mesh
+    mesh = Mesh(vertices=np.array([[0.,0.,0.],[1.,0.,0.],[0.,1.,0.]]),
+                faces=np.array([[0,1,2]]))
+    def matrix(rho, thickness):
+        part = SimpleNamespace(coil_mesh=mesh, basis_elements=[SimpleNamespace(
+            triangles=np.array([0]), area=np.array([.5]), current=np.array([current]))
+            for current in ([1.,0,0],[0.,1,0],[-1.,-1,0])])
+        args = SimpleNamespace(conductor_thickness=thickness,
+                               specific_conductivity_conductor=rho)
+        calculate_resistance_matrix([part],args)
+        return part.resistance_matrix
+    unit = matrix(1.,1.)
+    copper = matrix(1.68e-8,.002)
+    np.testing.assert_allclose(copper, unit * 1.68e-8/.002, rtol=1e-14,atol=0)
+    np.testing.assert_allclose(matrix(2.82e-8,.002), copper*(2.82/1.68),rtol=1e-14,atol=0)
+
+
 def test_material_and_resistivity_are_serialized_for_metrics():
     cfg = Config()
     cfg.fasthenry.material = 'Al'

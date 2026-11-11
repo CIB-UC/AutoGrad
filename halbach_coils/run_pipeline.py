@@ -10,7 +10,7 @@ Usage:
     .\.venv\Scripts\python.exe halbach_coils\run_pipeline.py --skip-gradient       # re-use a previous wire STL
     .\.venv\Scripts\python.exe halbach_coils\run_pipeline.py --skip-leads --skip-shell
 
-Outputs go to ``resultados/pipeline/G{axis}_tk{N}_lvl{M}/`` (or ``...(2)`` on
+Outputs go to ``results/pipeline/G{axis}_tk{N}_lvl{M}/`` (or ``...(2)`` on
 re-run). Each full run gets its own subfolder.
 """
 
@@ -34,6 +34,8 @@ from coilgen.gradient import run_gradient
 from coilgen.leads import run_leads
 from coilgen.shell import run_shell
 from coilgen.design_state import validate_design_state, copy_design_state
+from coilgen.lead_surface import GeometryRejected
+from pyCoilGen.helpers.wire_geometry import WireInterferenceError
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,9 @@ class PipelineResult:
     discarded: bool = False
     field_plots: dict | None = None
     metrics_path: str | None = None
+    needs_revision: bool = False
+    message: str = ''
+    geometry_report_path: str | None = None
 
 
 def _coil_only_wire_paths(folder: str) -> list[str]:
@@ -51,7 +56,8 @@ def _coil_only_wire_paths(folder: str) -> list[str]:
     paths: set[str] = set()
     patterns = ('Gradient_*_wire_0.stl', 'Gradient_*_wire_0_?.stl')
     for pattern in patterns:
-        for wire in glob.glob(os.path.join(folder, pattern)) + glob.glob(os.path.join(folder, 'Bobina', pattern)):
+        for wire in (wire for group in ('', 'Coil', 'Bobina')
+                     for wire in glob.glob(os.path.join(folder, group, pattern))):
             if not _paths._is_derived_wire_stl(wire):
                 paths.add(wire)
     return sorted(paths)
@@ -66,7 +72,7 @@ def _seed_wire_from_previous_run(cfg: Config, run_dir: str) -> bool:
     design = cfg.design_folder
     best_wire = ''
     best_mtime = 0.0
-    for folder in glob.glob(os.path.join(_paths.PIPELINE_OUTPUT_BASE, f'{design}*')):
+    for folder in glob.glob(os.path.join(_paths.output_base(cfg.output_language), f'{design}*')):
         if not os.path.isdir(folder):
             continue
         if os.path.normpath(folder) == os.path.normpath(run_dir):
@@ -123,7 +129,7 @@ def _ensure_wire_exists(cfg: Config, run_dir: str, run_gradient: bool) -> str:
 
 
 def _run_pipeline(cfg: Config, should_stop=None, ask_user=None,
-                 question_language: str = "es") -> PipelineResult:
+                 question_language: str = "en", electrical_lock=None) -> PipelineResult:
     """Run the configured pipeline steps and return its outcome.
 
     ``question_language`` controls the interactive congestion warning emitted
@@ -134,11 +140,12 @@ def _run_pipeline(cfg: Config, should_stop=None, ask_user=None,
     no output directory was supplied.
     """
     field_plots = None
+    geometry_report_path = None
     if cfg.output_dir:
         run_dir = os.path.abspath(cfg.output_dir)
         os.makedirs(run_dir, exist_ok=True)
     else:
-        run_dir = _paths.unique_run_dir(_paths.PIPELINE_OUTPUT_BASE, cfg.design_folder)
+        run_dir = _paths.unique_run_dir(_paths.output_base(cfg.output_language), cfg.design_folder)
         cfg.output_dir = run_dir
 
     print("=" * 70)
@@ -170,9 +177,23 @@ def _run_pipeline(cfg: Config, should_stop=None, ask_user=None,
         _solution, _metrics, collision_report = run_gradient(
             cfg, output_dir=run_dir, check_overlap=cfg.overlap_warn)
         field_plots = _metrics.get('field_plots')
+        geometry_report_path = _metrics.get('geometry_report_path')
         del _solution
         print()
+        distribution = _metrics.get('return_path_distribution',{})
+        if distribution.get('status') == 'unresolved':
+            from pyCoilGen.helpers.return_path_distribution import return_path_distribution_message
+            message = return_path_distribution_message(distribution,question_language)
+            print(message)
+            return PipelineResult(run_dir,field_plots=field_plots,needs_revision=True,message=message,
+                                  geometry_report_path=geometry_report_path)
         if collision_report is not None and collision_report.n_collisions > 0:
+            physical_failure = collision_report.physical_interference_message(question_language)
+            if physical_failure:
+                print(physical_failure)
+                return PipelineResult(run_dir, field_plots=field_plots,
+                                      needs_revision=True, message=physical_failure,
+                                      geometry_report_path=_metrics.get('geometry_report_path'))
             question = collision_report.user_question(question_language)
             print(question)
             if ask_user is not None and not ask_user(question):
@@ -200,7 +221,11 @@ def _run_pipeline(cfg: Config, should_stop=None, ask_user=None,
         lead_paths = run_leads(cfg, input_stl=wire_stl)
         if lead_paths:
             from coilgen.final_field import evaluate_final_conductor
-            final = evaluate_final_conductor(cfg, wire_stl, lead_paths[0], run_dir)
+            if electrical_lock is None:
+                final = evaluate_final_conductor(cfg, wire_stl, lead_paths[0], run_dir)
+            else:
+                final = evaluate_final_conductor(
+                    cfg, wire_stl, lead_paths[0], run_dir, electrical_lock=electrical_lock)
             field_plots = final['field_plots']
         print()
 
@@ -215,30 +240,46 @@ def _run_pipeline(cfg: Config, should_stop=None, ask_user=None,
     print("=" * 70)
     print("  Pipeline complete.")
     print("=" * 70)
-    return PipelineResult(run_dir, field_plots=field_plots)
+    return PipelineResult(run_dir, field_plots=field_plots,
+                          geometry_report_path=geometry_report_path)
 
 
 def run_pipeline(cfg: Config, should_stop=None, ask_user=None,
-                 question_language: str = "es") -> PipelineResult:
+                 question_language: str = "en", electrical_lock=None) -> PipelineResult:
     """Run the stages, then arrange outputs and expose the final metrics."""
     from dataclasses import replace
     from coilgen.outputs import organize_outputs, relocate_paths, write_result_summary
+    from coilgen.output_layout import prepare_run_directory
+    prepare_run_directory(cfg)
 
     try:
-        result = _run_pipeline(cfg, should_stop, ask_user, question_language)
+        if electrical_lock is None:
+            result = _run_pipeline(cfg, should_stop, ask_user, question_language)
+        else:
+            result = _run_pipeline(cfg, should_stop, ask_user, question_language,
+                                   electrical_lock=electrical_lock)
+    except (GeometryRejected, WireInterferenceError) as exc:
+        # Known geometric infeasibility is a reviewable outcome, not a worker
+        # crash. Keep its artifacts and let the remaining batch axes finish.
+        message = (('The geometry needs revision: ' if question_language == 'en' else
+                    'La geometría necesita revisión: ') + str(exc))
+        print(message)
+        result = PipelineResult(cfg.output_dir, needs_revision=True, message=message)
     except Exception as exc:
         if cfg.output_dir and os.path.isdir(cfg.output_dir):
-            organize_outputs(cfg.output_dir)
-            write_result_summary(cfg.output_dir, error=exc)
+            organize_outputs(cfg.output_dir, language=cfg.output_language)
+            write_result_summary(cfg.output_dir, error=exc, language=cfg.output_language)
         raise
-    moves = organize_outputs(result.output_dir)
-    metrics_path = write_result_summary(result.output_dir)
+    moves = organize_outputs(result.output_dir, language=cfg.output_language)
+    metrics_path = write_result_summary(result.output_dir, language=cfg.output_language,
+                                       error=result.message if result.needs_revision else None)
     return replace(result, field_plots=relocate_paths(result.field_plots, moves),
+                   geometry_report_path=relocate_paths(result.geometry_report_path, moves),
                    metrics_path=metrics_path or None)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the full coil-mold pipeline.")
+    parser = argparse.ArgumentParser(description="AutoGrad: run the full coil-mold pipeline.")
     parser.add_argument('--axis', default='y', choices=('x', 'y', 'z'))
     parser.add_argument('--b0', default='+y', choices=('+x', '-x', '+y', '-y', '+z', '-z'),
                         help='Physical B0 direction; use --b0=-y for a negative direction')
@@ -252,7 +293,10 @@ def main():
     parser.add_argument('--skip-gradient', action='store_true')
     parser.add_argument('--skip-leads', action='store_true')
     parser.add_argument('--skip-shell', action='store_true')
-    parser.add_argument('--no-overlap-warn', action='store_true')
+    parser.add_argument('--no-b0-marker', action='store_true',
+                        help='Disable the automatic B0 orientation marks on the shell')
+    parser.add_argument('--no-overlap-warn', action='store_true',
+                        help='Hide clearance diagnostics; physical validation remains enabled')
     args = parser.parse_args()
 
     cfg = Config(
@@ -266,6 +310,7 @@ def main():
     cfg.cylinder.radius = args.radius
     cfg.cylinder.height = args.height
     cfg.shell.layer = args.layer
+    cfg.shell.b0_marker = not args.no_b0_marker
     cfg.control.run_gradient = not args.skip_gradient
     cfg.control.run_leads = not args.skip_leads
     cfg.control.run_shell = not args.skip_shell

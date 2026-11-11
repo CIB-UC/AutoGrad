@@ -83,24 +83,32 @@ def find_group_cut_position(loop_group: TopoGroup, group_center: np.ndarray, mes
 
         # NOTE: cut_position.cut_point.v has shape (n,3) i.e. Python not MATLAB convention
 
-        try:
-            # Delete repeating degenerate cut points
-            arr_abs = np.abs(np.diff(cut_position.cut_point.uv, axis=1))  # Python convention
-            repeat_inds = np.where(arr_abs < 1e-10)[0]
-            is_repeating_cutpoint = np.any(repeat_inds)
-            if is_repeating_cutpoint:
-                cut_position.cut_point.v = np.delete(cut_position.cut_point.v, np.where(repeat_inds), axis=1)
-                cut_position.cut_point.uv = np.delete(cut_position.cut_point.uv, np.where(repeat_inds), axis=1)
-                cut_position.cut_point.segment_ind = np.delete(
-                    cut_position.cut_point.segment_ind, np.where(repeat_inds))
-        except ValueError as e:
-            log.debug("Exception: %s", e)
+        # A plane through a vertex intersects both incident segments. Keep one
+        # station per physical point, including duplicates across the seam.
+        # CutPoint uses rows (N,3)/(N,2), unlike the loop's column convention.
+        if cut_position.cut_point.v is not None:
+            keep = []
+            for index, point in enumerate(cut_position.cut_point.v):
+                if not keep or np.all(np.linalg.norm(
+                        cut_position.cut_point.v[keep] - point, axis=1) > 1e-10):
+                    keep.append(index)
+            cut_position.cut_point.v = cut_position.cut_point.v[keep]
+            cut_position.cut_point.uv = cut_position.cut_point.uv[keep]
+            cut_position.cut_point.segment_ind = np.asarray(
+                cut_position.cut_point.segment_ind)[keep]
 
         # https://github.com/kev-m/pyCoilGen/issues/60
         # Take care of the exception that the cut plane has no intersection with the loop
-        if cut_position.cut_point.v is None:
+        if cut_position.cut_point.v is None or len(cut_position.cut_point.v) < 2:
             max_ind = np.argmax(np.dot(loop_group.loops[loop_ind].v.T, cut_plane_direction))
             min_ind = np.argmin(np.dot(loop_group.loops[loop_ind].v.T, cut_plane_direction))
+            if np.linalg.norm(loop_group.loops[loop_ind].v[:, max_ind] -
+                              loop_group.loops[loop_ind].v[:, min_ind]) <= 1e-10:
+                max_ind = np.argmax(np.linalg.norm(loop_group.loops[loop_ind].v -
+                    loop_group.loops[loop_ind].v[:, [min_ind]], axis=0))
+                if np.linalg.norm(loop_group.loops[loop_ind].v[:, max_ind] -
+                                  loop_group.loops[loop_ind].v[:, min_ind]) <= 1e-10:
+                    raise ValueError('Cannot choose distinct cuts on a degenerate contour loop.')
 
             # To get (n,3)
             cut_position.cut_point.v = np.vstack(

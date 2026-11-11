@@ -140,17 +140,97 @@ def _retessellate_collinear_faces(mesh):
             break
 
 
-def _serialized_shell(mesh):
-    serialized = trimesh.load_mesh(BytesIO(mesh.export(file_type='stl')), file_type='stl')
+def _load_stl_for_validation(source, scale):
+    # STL has no unit tag. Trimesh's absolute 1e-8 merge/sliver thresholds
+    # are suitable for mm, but can merge distinct vertices of a metre STL.
+    # Quantize in the requested output units FIRST, then merge/repair in mm.
+    mesh = trimesh.load_mesh(source, file_type='stl', process=False)
+    mesh.apply_scale(scale)
+    mesh.process()
+    return mesh
+
+
+def load_shell_stl(filename, units='mm'):
+    """Reload an STL using its declared units without metre-scale overmerging.
+
+    Return coordinates in those same units. Use millimetres for geometric
+    sliver checks, whose trimesh thresholds are absolute rather than relative.
+    """
+    scale = {'mm': 1., 'm': 1000.}[units]
+    mesh = _load_stl_for_validation(filename, scale)
+    mesh.apply_scale(1 / scale)
+    return mesh
+
+
+def _cancel_coincident_faces(mesh):
+    """Cancel opposite copies of a quantized face, retaining its net boundary.
+
+    Keeping one arbitrary copy of an opposite pair opens a zero-thickness
+    sheet. Equal-orientation duplicates still retain a single boundary face.
+    """
+    faces = mesh.faces
+    _, groups, counts = np.unique(np.sort(faces, axis=1), axis=0,
+                                  return_inverse=True, return_counts=True)
+    duplicates = np.flatnonzero(counts > 1)
+    if not len(duplicates):
+        return
+    parity = ((faces[:, 0] > faces[:, 1]).astype(int)
+              +(faces[:, 0] > faces[:, 2])+(faces[:, 1] > faces[:, 2])) % 2
+    order = np.argsort(groups, kind='stable')
+    starts = np.r_[0, np.cumsum(counts)]
+    keep = np.ones(len(faces), dtype=bool)
+    for group in duplicates:
+        indices = order[starts[group]:starts[group+1]]
+        net = int(np.sum(1-2*parity[indices]))
+        keep[indices] = False
+        if net:
+            keep[indices[np.flatnonzero(parity[indices] == int(net < 0))[0]]] = True
+    mesh.update_faces(keep)
+
+
+def _retain_serialized_carrier(mesh, cfg, precision):
+    # Face-connected pieces must already be closed. Never fill a hole or
+    # silently discard an open component while selecting the carrier.
+    parts = list(mesh.split(only_watertight=False, repair=False))
+    if (len(parts) <= 1 or not all(part.is_watertight and part.is_winding_consistent
+                                  and part.volume != 0 and np.all(part.nondegenerate_faces())
+                                  for part in parts)):
+        return mesh
+    positive = [part for part in parts if part.volume > 0]
+    if len(positive) <= 1:
+        return mesh
+    axis = np.asarray(cfg.rotated_cylinder_axis, float)
+    half = float(cfg.cylinder.height)*500  # serialization validation uses mm
+    carriers = [part for part in positive
+                if abs((part.vertices@axis).min()+half) <= precision
+                and abs((part.vertices@axis).max()-half) <= precision]
+    if len(carriers) != 1:
+        raise RuntimeError('Serialized former must have exactly one connected body joining both rims.')
+    retained = carriers[0]
+    for part in positive:
+        if part is not retained:
+            print(f"  Removed disconnected STL channel offcut: {part.volume:.9g} mm³; "
+                  f"{len(part.faces)} faces (does not join the carrier rims).")
+    # Preserve all negative cavity surfaces rather than filling their volume.
+    return trimesh.util.concatenate([retained]+[part for part in parts if part.volume < 0])
+
+
+def _serialized_shell(mesh, validation_scale=1., generated_config=None):
+    serialized = _load_stl_for_validation(BytesIO(mesh.export(file_type='stl')), validation_scale)
     _collapse_stl_precision_edges(serialized)
     # Rounding can make a long, thin face collinear even when all of its
     # original edges/faces were valid. Preserve its neighboring topology
     # before dropping it; deleting the face alone would open a slit.
     _retessellate_collinear_faces(serialized)
-    serialized.update_faces(serialized.nondegenerate_faces() & serialized.unique_faces())
+    serialized.update_faces(serialized.nondegenerate_faces())
+    _cancel_coincident_faces(serialized)
     serialized.remove_unreferenced_vertices()
+    if generated_config is not None:
+        precision = 2*float(np.spacing(np.float32(np.abs(mesh.vertices).max())))*validation_scale
+        serialized = _retain_serialized_carrier(serialized, generated_config, precision)
+    serialized.apply_scale(1 / validation_scale)
     payload = serialized.export(file_type='stl')
-    return payload, trimesh.load_mesh(BytesIO(payload), file_type='stl')
+    return payload, _load_stl_for_validation(BytesIO(payload), validation_scale)
 
 
 def _valid_shell(mesh):
@@ -159,7 +239,7 @@ def _valid_shell(mesh):
             and np.all(mesh.nondegenerate_faces()))
 
 
-def export_validated_shell_stl(mesh, filename):
+def export_validated_shell_stl(mesh, filename, units='mm', *, generated_config=None):
     """Validate the actual float32 STL, removing collapsed/duplicate triangles.
 
     Booleans can leave tiny edges that collapse at STL precision. Merging those
@@ -167,7 +247,8 @@ def export_validated_shell_stl(mesh, filename):
     of those faces are collapsed only within STL float32 precision. Validate
     a second reload before publishing, rather than reporting the in-memory mesh.
     """
-    payload, final = _serialized_shell(mesh)
+    validation_scale = {'mm': 1., 'm': 1000.}[units]
+    payload, final = _serialized_shell(mesh, validation_scale, generated_config)
     if not _valid_shell(final) and mesh.is_watertight and mesh.is_winding_consistent:
         # Some CSG results contain exactly zero-volume sheets and collinear
         # T-junction triangles. Keep every physical component, simplify only
@@ -182,11 +263,12 @@ def export_validated_shell_stl(mesh, filename):
                 tolerance = min(float(trimesh.constants.tol.merge), precision)
                 repaired = trimesh_from_manifold(solid.simplify(tolerance))
                 _retessellate_collinear_faces(repaired)
-                payload, final = _serialized_shell(repaired)
+                payload, final = _serialized_shell(repaired, validation_scale, generated_config)
     if not _valid_shell(final):
         raise RuntimeError('Shell STL failed validation after export; no result was published.')
     with open(filename, 'xb') as stream:
         stream.write(payload)
+    final.apply_scale(1 / validation_scale)
     return final
 
 
@@ -300,8 +382,72 @@ def print_wire_dims(dims, label):
     print(f"    {label} axial centre    : {dims['axial_center']*1000:.2f} mm")
 
 
+def ordered_groove_manifold(rings, side_faces):
+    """Union exact capped sweep segments; return a solid in physical metres.
+
+    Manufacturing profiles can overlap even when the round wire is clear.
+    Boolean input must represent the union of those volumes, rather than a
+    self-overlapping indexed sweep or its quantized STL surface.
+    """
+    rings = np.asarray(rings, dtype=float)
+    side_faces = np.asarray(side_faces)
+    if (rings.ndim != 3 or rings.shape[2] != 3 or rings.shape[0] < 2 or rings.shape[1] < 8
+            or not np.all(np.isfinite(rings))):
+        raise ValueError('Expected finite ordered groove sections in metres.')
+    count, corners, _ = rings.shape
+    if (side_faces.shape != (count-1, 2*corners, 3)
+            or not np.issubdtype(side_faces.dtype, np.integer)
+            or side_faces.min() < 0 or side_faces.max() >= 2*corners):
+        raise ValueError('Invalid ordered groove side triangles.')
+    indices = np.arange(corners)
+    caps = np.vstack((np.column_stack((np.full(corners, 2*corners),
+                                      (indices+1) % corners, indices)),
+                      np.column_stack((np.full(corners, 2*corners+1),
+                                       corners+indices, corners+(indices+1) % corners))))
+    segments = []
+    for pair, sides in zip(zip(rings[:-1], rings[1:]), side_faces):
+        pair = np.asarray(pair)
+        # Millimetre CSG avoids losing small profiles to an absolute kernel
+        # tolerance. Every side is the original triangle, including its diagonal.
+        vertices = np.vstack((pair.reshape(-1, 3), pair.mean(axis=1)))*1000
+        mesh = trimesh.Trimesh(vertices, np.vstack((sides, caps)), process=False)
+        mesh.fix_normals()
+        segment = manifold_from_trimesh(mesh)
+        if segment.status() != m3d.Error.NoError or segment.is_empty() or segment.volume() <= 0:
+            raise RuntimeError('Ordered groove contains an invalid sweep segment.')
+        segments.append(segment)
+    result = m3d.Manifold.batch_boolean(segments, m3d.OpType.Add)
+    if result.status() != m3d.Error.NoError or result.is_empty() or result.volume() <= 0:
+        raise RuntimeError('Ordered groove segment union failed.')
+    return result.scale((.001, .001, .001))
+
+
+def _load_ordered_groove(stl_path):
+    from .leads import current_path_path, _file_sha256
+
+    reference = current_path_path(stl_path)
+    if not os.path.isfile(reference):
+        return None
+    with np.load(reference, allow_pickle=False) as saved:
+        if 'groove_rings' not in saved and 'groove_side_faces' not in saved:
+            return None  # compatibility with older terminal outputs
+        required = {'groove_rings', 'groove_side_faces', 'groove_format_version',
+                    'units', 'coordinate_frame', 'with_leads_sha256'}
+        if (not required.issubset(saved.files) or int(saved['groove_format_version']) != 1
+                or str(saved['units'].item()) != 'm'
+                or str(saved['coordinate_frame'].item()) != 'physical_xyz'
+                or str(saved['with_leads_sha256'].item()) != _file_sha256(stl_path)):
+            raise ValueError('Ordered groove reference does not match the selected conductor STL.')
+        return saved['groove_rings'].copy(), saved['groove_side_faces'].copy()
+
+
 def prepare_wire_manifold(stl_path, expansion, axis, label='wire'):
     print(f"  Loading {label}: {stl_path}", flush=True)
+    if expansion == 0 and not _P.resolve_self_intersections:
+        ordered = _load_ordered_groove(stl_path)
+        if ordered is not None:
+            print(f"  Unioning {len(ordered[0])-1} original groove segments...", flush=True)
+            return ordered_groove_manifold(*ordered)
     wire_tm = trimesh.load(stl_path)
 
     if not wire_tm.is_watertight:
@@ -682,6 +828,35 @@ def build_auto_hollow_cylinder(cfg: Config, wire_stl: str) -> "m3d.Manifold":
     return tube.transform(T)
 
 
+def retain_connected_former(solid, cfg):
+    """Keep the generated carrier joining both original cylinder rims.
+
+    Subtracted channels can release closed positive islands: these are loose
+    offcuts, not part of the one-piece carrier. Selection is topological and
+    based on both axial rims, never a volume threshold. Negative components
+    can be real enclosed cavities; leave those results untouched for the
+    ordinary strict export validation rather than filling any cavity.
+    Custom input CAD never uses this policy.
+    """
+    parts = solid.decompose()
+    if len(parts) <= 1 or any(part.volume() <= 0 for part in parts):
+        return solid, []
+    axis = np.asarray(cfg.rotated_cylinder_axis, float)
+    half = float(cfg.cylinder.height) / 2
+    roundoff = 32 * np.finfo(float).eps * max(half, cfg.shell_outer_radius)
+    carriers = []
+    for index, part in enumerate(parts):
+        vertices = np.asarray(part.to_mesh64().vert_properties)[:,:3]
+        axial = vertices @ axis
+        if abs(axial.min()+half) <= roundoff and abs(axial.max()-half) <= roundoff:
+            carriers.append(index)
+    if len(carriers) != 1:
+        raise RuntimeError('Generated former must have exactly one connected body joining both cylinder rims.')
+    removed = [{'volume_mm3': float(part.volume()*1e9), 'faces': int(part.num_tri())}
+               for index, part in enumerate(parts) if index != carriers[0]]
+    return parts[carriers[0]], removed
+
+
 def run_shell(
     cfg: Config,
     wire_with_leads_stl: str | None = None,
@@ -1002,6 +1177,16 @@ def run_shell(
     print()
 
     # ----- export ----------------------------------------------------------
+    if auto_mode:
+        connected, offcuts = retain_connected_former(results[0][1], cfg)
+        results = [('shell', connected)]
+        for offcut in offcuts:
+            print(f"  Removed disconnected channel offcut: {offcut['volume_mm3']:.9g} mm³; "
+                  f"{offcut['faces']} faces (does not join the carrier rims).")
+    if cfg.shell.b0_marker:
+        from .shell_marker import mark_shell_b0
+        results = mark_shell_b0(results, cfg)
+
     step += 1
     print(f"  [{step}/{total_steps}] Exporting results...")
     os.makedirs(out_dir, exist_ok=True)
@@ -1018,13 +1203,15 @@ def run_shell(
         else:
             out_name = f"{shell_base}_g{layer}{label}.stl"
         out_path = unique_path(os.path.join(out_dir, out_name))
-        result_tm = export_validated_shell_stl(result_tm, out_path)
+        result_tm = export_validated_shell_stl(result_tm, out_path,
+                                               units='mm' if export_mm else 'm',
+                                               generated_config=cfg if auto_mode else None)
         out_paths.append(out_path)
 
         unit = 'mm' if export_mm else 'm'
         bb = result_tm.bounds
         print(f"    {'Shell' if auto_mode else 'Half ' + label.upper()} "
-              f"({'g_'+layer+label if not auto_mode else '1 piece'}):")
+              f"({f'g_{layer}{label}' if not auto_mode else '1 piece'}):")
         print(f"      Vertices     : {len(result_tm.vertices)}")
         print(f"      Faces        : {len(result_tm.faces)}")
         print(f"      Watertight   : {result_tm.is_watertight}")

@@ -40,7 +40,7 @@ class FieldViewer(tk.Toplevel):
         self.tr = getattr(self.root, "tr", lambda text, **values: text.format(**values))
         self.geometry("1100x760")
         self.minsize(800, 560)
-        self.title(self.tr("Field results") + " — " + self.data.project_name)
+        self.title("AutoGrad — " + self.tr("Field results") + " — " + self.data.project_name)
 
         control = ttk.Frame(self, padding=8)
         control.pack(fill="x")
@@ -74,11 +74,14 @@ class FieldViewer(tk.Toplevel):
 
     def retranslate(self):
         """Called by the application after changing its language, if open."""
-        self.title(self.tr("Field results") + " — " + self.data.project_name)
+        self.title("AutoGrad — " + self.tr("Field results") + " — " + self.data.project_name)
         self.view_label.configure(text=self.tr("View:"))
         self.selector.configure(values=[self.tr(PLOT_LABELS[k]) for k in PLOT_KINDS])
         self.selector.current(PLOT_KINDS.index(self._current_kind))
-        self.metrics_label.configure(text=electrical_result_text(self.metrics_path, self.tr))
+        slope, _fit, _residual, _rms = self.data.linearity()
+        gradient = self.tr('Generated gradient: {slope:.4g} mT/m/A', slope=slope)
+        electrical = electrical_result_text(self.metrics_path, self.tr)
+        self.metrics_label.configure(text=gradient + ('\n' + electrical if electrical else ''))
         self._draw()
 
     def _on_selected(self, _event=None):

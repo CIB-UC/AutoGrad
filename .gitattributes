@@ -1,0 +1,17 @@
+# Stable source diffs across Windows and Unix checkouts.
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.ini text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+*.bat text eol=crlf
+
+# Preserve exact bytes of scientific fixtures and manufacturing inputs.
+*.npy binary
+*.npz binary
+*.stl binary
+*.png binary

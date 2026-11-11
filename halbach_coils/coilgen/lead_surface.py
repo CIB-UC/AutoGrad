@@ -15,7 +15,7 @@ import json
 import manifold3d as m3d
 import numpy as np
 import trimesh
-from scipy.spatial import cKDTree
+from pyCoilGen.helpers.wire_geometry import near_segment_pairs, segment_closest, segment_distances, wire_contact_pairs
 
 
 class GeometryRejected(ValueError):
@@ -42,8 +42,13 @@ class Options:
     section_tolerance: float = .02
     radius_tolerance: float = .00015
     sector_angular_half: float = .35
+    strict_manufacturing: bool = True
+    conductor_diameter: float | None = None
 
     def validate(self):
+        if not self.strict_manufacturing and (self.conductor_diameter is None
+                or not np.isfinite(self.conductor_diameter) or self.conductor_diameter <= 0):
+            raise ValueError("Round-wire routing requires the real conductor diameter")
         for name in ("max_step", "min_bend_radius", "exit_margin", "radius_tolerance"):
             if not np.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive")
@@ -168,7 +173,7 @@ def quintic(p0, p1, d0, d1, dd0=None):
     return c
 
 
-def eval_surface(c, t, R, e1, e2, axis, origin):
+def eval_surface(c, t, R, e1, e2, axis, origin, radial_profile=None):
     uv = np.polynomial.polynomial.polyval(t, c).T
     d = np.polynomial.polynomial.polyval(t, np.arange(1,6)[:, None]*c[1:]).T
     dd = np.polynomial.polynomial.polyval(t, (np.arange(2,6)*np.arange(1,5))[:, None]*c[2:]).T
@@ -178,15 +183,33 @@ def eval_surface(c, t, R, e1, e2, axis, origin):
     p = origin + R*n + uv[:, 1, None]*axis
     dp = d[:, 0, None]*circum + d[:, 1, None]*axis
     ddp = dd[:, 0, None]*circum - (d[:, 0]**2/R)[:, None]*n + dd[:, 1, None]*axis
+    if radial_profile is not None:
+        radial_speed, duration = radial_profile
+        u = np.minimum(t/duration, 1.)
+        # Integrate a smooth, monotonically braking radial velocity. Its
+        # derivative and acceleration vanish at the end of the short blend.
+        rho = R+radial_speed*duration*(u-u**3+.5*u**4)
+        dr = radial_speed*(1-3*u**2+2*u**3)
+        ddr = radial_speed/duration*(-6*u+6*u**2)
+        angle_speed, angle_accel = d[:, 0]/R, dd[:, 0]/R
+        p = origin+rho[:, None]*n+uv[:, 1, None]*axis
+        dp = dr[:, None]*n+(rho*angle_speed)[:, None]*circum+d[:, 1, None]*axis
+        ddp = ((ddr-rho*angle_speed**2)[:, None]*n
+               +(2*dr*angle_speed+rho*angle_accel)[:, None]*circum+dd[:, 1, None]*axis)
     speed = np.linalg.norm(dp, axis=1)
     if np.any(speed < 1e-8):
         raise GeometryRejected("Stationary point on lead")
     curvature = np.linalg.norm(np.cross(dp, ddp), axis=1)/speed**3
-    return p, unit(dp), n, curvature
+    tangent = unit(dp)
+    if radial_profile is not None:
+        # An orthonormal section frame preserves the actual input polygon
+        # when the tangent has a radial component.
+        n = unit(n-np.sum(n*tangent, axis=1)[:, None]*tangent)
+    return p, tangent, n, curvature
 
 
 def surface_lead(ring, outward, axis, origin, exit_axial, angular_offset,
-                 handle_scale, options, initial_curvature=0.):
+                 handle_scale, options, initial_curvature=0., *, radial_bounds=None):
     """Preserve the input polygon, transported with a radial section axis."""
     center = ring.mean(0)
     e1 = unit(radial(center[None], axis, origin)[0])
@@ -194,25 +217,45 @@ def surface_lead(ring, outward, axis, origin, exit_axial, angular_offset,
     R = np.linalg.norm(radial(center[None], axis, origin)[0])
     t0 = unit(outward - np.dot(outward, e1)*e1)
     junction_angle = float(np.degrees(np.arccos(np.clip(unit(outward) @ t0, -1, 1))))
-    if junction_angle > 1.0:
-        raise GeometryRejected("Junction tangent differs by more than one degree")
+    projected_residual = float(np.max(np.abs((ring-center) @ t0)))
+    continue_radially = junction_angle > 1.0 or projected_residual > 2e-5
+    if continue_radially:
+        if radial_bounds is None:
+            raise GeometryRejected("Junction tangent differs by more than one degree" if junction_angle > 1.0
+                                   else "Input ring not normal to the outward tangent")
+        t0 = unit(outward)
     start = np.array([0., np.dot(center-origin, axis)])
     end = np.array([angular_offset*R, exit_axial])
     distance = np.linalg.norm(end-start)
     speed = distance*handle_scale
+    radial_profile = None
+    if continue_radially:
+        # Faceted cylinders and bounded winding repair can tilt a valid cut
+        # plane. Continue its exact tangent before settling onto a cylinder;
+        # never rotate/deform the shared ring or enlarge the winding envelope.
+        radial_speed = float(t0 @ e1)*speed
+        blend_length = max(.001, 3*options.min_bend_radius*abs(float(t0 @ e1)))
+        duration = min(1., blend_length/speed)
+        final_radius = R+.5*radial_speed*duration
+        if (min(R, final_radius) < radial_bounds[0]-1e-10
+                or max(R, final_radius) > radial_bounds[1]+1e-10):
+            raise GeometryRejected("Lead radius leaves the winding envelope")
+        radial_profile = (radial_speed, duration)
     d0 = np.array([np.dot(t0, e2), np.dot(t0, axis)])*speed
     d1 = np.array([0., np.sign(exit_axial-start[1])*distance])
     dd0 = initial_curvature*speed**2*np.array([-d0[1], d0[0]])/speed
     coeff = quintic(start, end, d0, d1, dd0)
     dense_t = np.linspace(0, 1, max(513, int(distance/options.max_step)*5))
-    dense, _, _, curvature = eval_surface(coeff, dense_t, R, e1, e2, axis, origin)
+    dense, _, _, curvature = eval_surface(coeff, dense_t, R, e1, e2, axis, origin, radial_profile)
     min_radius = 1/max(float(curvature.max()), 1e-12)
-    if min_radius < options.min_bend_radius:
+    if options.strict_manufacturing and min_radius < options.min_bend_radius:
         raise GeometryRejected("Bend radius below minimum")
     arclen = np.r_[0., np.cumsum(np.linalg.norm(np.diff(dense, axis=0), axis=1))]
     sample_s = np.linspace(0, arclen[-1], int(np.ceil(arclen[-1]/options.max_step))+1)
     sample_t = np.interp(sample_s, arclen, dense_t)
-    path, T, N, _ = eval_surface(coeff, sample_t, R, e1, e2, axis, origin)
+    path, T, N, _ = eval_surface(coeff, sample_t, R, e1, e2, axis, origin, radial_profile)
+    if continue_radially:
+        junction_angle = float(np.degrees(np.arccos(np.clip(unit(outward) @ T[0], -1, 1))))
     B = unit(np.cross(T, N))
     offsets = ring-center
     coords = np.column_stack([offsets @ N[0], offsets @ B[0]])
@@ -236,49 +279,11 @@ def surface_lead(ring, outward, axis, origin, exit_axial, angular_offset,
         "junction_tangent_error_deg": junction_angle,
         "max_step_mm": float(np.linalg.norm(np.diff(path, axis=0), axis=1).max()*1000),
         "exit_tangent_error_deg": float(np.degrees(np.arccos(np.clip(abs(T[-1] @ axis), -1, 1)))),
+        "radial_continuation": continue_radially,
+        "radial_adjustment_mm": float((final_radius-R)*1000) if continue_radially else 0.,
     }
     return Lead(path, T, rings, min_radius, metrics)
 
-
-def segment_closest(a, b, c, d):
-    """Exact pair distances and vectors from the closest point on A to B."""
-    u, v, w = b-a, d-c, a-c
-    A, B, C = (u*u).sum(1), (u*v).sum(1), (v*v).sum(1)
-    D, E = (u*w).sum(1), (v*w).sum(1)
-    denom = A*C-B*B
-    safe = denom > 1e-24
-    s = np.divide(B*E-C*D, denom, out=np.zeros_like(A), where=safe)
-    t = np.divide(A*E-B*D, denom, out=np.zeros_like(A), where=safe)
-    interior = safe & (s >= 0) & (s <= 1) & (t >= 0) & (t <= 1)
-    distances = np.full(len(a), np.inf)
-    vectors = -w-s[:,None]*u+t[:,None]*v
-    distances[interior] = np.linalg.norm(vectors[interior], axis=1)
-    for point, start, edge, norm2, sign in ((a,c,v,C,1), (b,c,v,C,1), (c,a,u,A,-1), (d,a,u,A,-1)):
-        f = np.clip(((point-start)*edge).sum(1)/np.maximum(norm2, 1e-30), 0, 1)
-        candidate = sign*(start+f[:,None]*edge-point)
-        new_distance = np.linalg.norm(candidate,axis=1)
-        better = new_distance < distances
-        vectors[better] = candidate[better]
-        distances[better] = new_distance[better]
-    return distances, vectors
-
-
-def segment_distances(a, b, c, d):
-    return segment_closest(a,b,c,d)[0]
-
-
-def near_segment_pairs(path_a, path_b, threshold):
-    a, b = path_a[:-1], path_a[1:]
-    c, d = path_b[:-1], path_b[1:]
-    if not len(a) or not len(c):
-        return np.empty(0, int), np.empty(0, int), np.empty(0)
-    tree = cKDTree((c+d)/2)
-    radius = threshold + np.linalg.norm(b-a, axis=1)/2 + np.linalg.norm(d-c, axis=1).max()/2
-    lists = tree.query_ball_point((a+b)/2, radius)
-    ia = np.repeat(np.arange(len(a)), [len(x) for x in lists])
-    ib = np.array([j for group in lists for j in group], dtype=int)
-    dist = segment_distances(a[ia], b[ia], c[ib], d[ib])
-    return ia, ib, dist
 
 
 def support_gaps(path_a, rings_a, path_b, rings_b, i, j):
@@ -426,6 +431,29 @@ def validate_mesh(mesh):
     return metrics
 
 
+
+def round_wire_clearance(ref, leads, order, diameter):
+    """Validate the real retained current path, independent of groove shape.
+
+    Section traversal can be reversed by the engine. Use the same original
+    centreline correspondence as final_current_path, including the cyclic seam.
+    """
+    centers = ref.rings.mean(axis=1)
+    reverse = (np.mean(np.linalg.norm(centers-ref.path[::-1], axis=1))
+               < np.mean(np.linalg.norm(centers-ref.path, axis=1)))
+    aligned = ref.path[::-1] if reverse else ref.path
+    path = np.concatenate((leads[1].path[::-1], aligned[order], leads[0].path))
+    path = path[np.r_[True, np.linalg.norm(np.diff(path, axis=0), axis=1) > 1e-12]]
+    i, j, distances, _ = wire_contact_pairs(path, diameter, closed=False)
+    if len(i):
+        worst = int(np.argmin(distances))
+        raise GeometryRejected(f"Round-wire clearance: {distances[worst]*1000:.6g} mm "
+                               f"< {diameter*1000:.6g} mm at segments {i[worst]}/{j[worst]}")
+    return dict(method="Exact nonlocal segment distances of the real round conductor",
+                required_centerline_distance_mm=diameter*1000,
+                local_arc_exclusion_mm=2*diameter*1000, contact_pairs=0)
+
+
 def plan(ref, sector_ref, exit_sign=-1, options=None):
     options = options or Options()
     options.validate()
@@ -435,6 +463,7 @@ def plan(ref, sector_ref, exit_sign=-1, options=None):
     centers = ref.rings.mean(1)
     radial_vectors = radial(centers, ref.axis, ref.origin)
     radii = np.linalg.norm(radial_vectors, axis=1)
+    radial_bounds = (float(radii.min()), float(radii.max()))
     sector = unit(np.asarray(sector_ref)-np.dot(sector_ref, ref.axis)*ref.axis)
     eligible = np.where(unit(radial_vectors) @ sector > np.cos(options.sector_angular_half))[0]
     if not len(eligible):
@@ -462,7 +491,7 @@ def plan(ref, sector_ref, exit_sign=-1, options=None):
                 continue
             end_ids = (left, right)
             # A constant-radius route must not flatten a layer transition.
-            if any(np.ptp(radii[(np.arange(i-2,i+3)) % len(radii)]) > options.radius_tolerance for i in end_ids):
+            if options.strict_manufacturing and any(np.ptp(radii[(np.arange(i-2,i+3)) % len(radii)]) > options.radius_tolerance for i in end_ids):
                 rejected["Layer transition at cut"] = rejected.get("Layer transition at cut",0)+1
                 continue
             anchor = unit(radial_vectors[station])
@@ -489,23 +518,30 @@ def plan(ref, sector_ref, exit_sign=-1, options=None):
                             if plane_t @ outward < 0:
                                 plane_t = -plane_t
                             lead = surface_lead(ref.rings[idx], plane_t, ref.axis, ref.origin,
-                                                exit_axial, offsets[k], handle, options)
+                                                exit_axial, offsets[k], handle, options,
+                                                radial_bounds=radial_bounds)
                             leads.append(lead)
-                        clear = clearance_check(leads, centers[order], envelope, options.clearance, ref.rings[order])
+                        clear = (clearance_check(leads, centers[order], envelope, options.clearance, ref.rings[order])
+                                 if options.strict_manufacturing else
+                                 round_wire_clearance(ref, leads, order, options.conductor_diameter))
                         result = attach(opened, leads)
                         metrics = validate_mesh(result)
                         for lead in leads:
                             validate_mesh(tube_mesh(lead.rings))
-                        # Exact lead-to-lead solid intersection complements bounds.
-                        lead_solids = [manifold(tube_mesh(x.rings)) for x in leads]
-                        overlap = lead_solids[0] ^ lead_solids[1]
-                        if overlap.volume() > 1e-6:
-                            raise GeometryRejected("Lead solid intersection")
-                        retained_solid = manifold(tube_mesh(ref.rings[order]))
-                        junction_volumes = [float((retained_solid ^ solid).volume())
-                                            for solid in lead_solids]
-                        if any(abs(v) > 1e-6 for v in junction_volumes):
-                            raise GeometryRejected("Lead-coil solid intersection at junction")
+                        # The manufacturing profile is a groove tool, not the
+                        # real round cable. Its overlaps are handled by the mold
+                        # union; strict studies may still request these bounds.
+                        junction_volumes = None
+                        if options.strict_manufacturing:
+                            lead_solids = [manifold(tube_mesh(x.rings)) for x in leads]
+                            overlap = lead_solids[0] ^ lead_solids[1]
+                            if overlap.volume() > 1e-6:
+                                raise GeometryRejected("Lead solid intersection")
+                            retained_solid = manifold(tube_mesh(ref.rings[order]))
+                            junction_volumes = [float((retained_solid ^ solid).volume())
+                                                for solid in lead_solids]
+                            if any(abs(v) > 1e-6 for v in junction_volumes):
+                                raise GeometryRejected("Lead-coil solid intersection at junction")
                         removed = np.arange(left,left+(right-left) % len(centers)+1) % len(centers)
                         removed_arc = float(np.linalg.norm(np.diff(centers[removed],axis=0),axis=1).sum()*1000)
                         report = {"status": "validated", "options": asdict(options),
@@ -518,6 +554,19 @@ def plan(ref, sector_ref, exit_sign=-1, options=None):
                                   "lead_coil_intersection_volumes_mm3": junction_volumes,
                                   "rejected_candidates": rejected,
                                   "scope": "Lead geometry only; pre-existing coil crossings are retained; no electromagnetic certification."}
+                        report["validation_scope"] = ("manufacturing_profile" if options.strict_manufacturing
+                                                      else "real_round_conductor")
+                        report["manufacturing_checks_enforced"] = options.strict_manufacturing
+                        if not options.strict_manufacturing:
+                            report["scope"] = ("Exact clearance of the real round conductor; "
+                                               "groove separation and bend recommendations are advisory.")
+                        report["warnings"] = [
+                            f"Terminal {k+1}: bend radius {lead.min_radius*1000:.6g} mm is below the "
+                            f"manufacturing recommendation {options.min_bend_radius*1000:.6g} mm."
+                            for k, lead in enumerate(leads) if lead.min_radius < options.min_bend_radius]
+                        if not options.strict_manufacturing:
+                            report["warnings"].append("Groove-profile clearance and overlap are advisory; "
+                                                      "the real round conductor passed its exact distance check.")
                         return result, leads, opened, report
                     except GeometryRejected as exc:
                         key = str(exc).split(":")[0]

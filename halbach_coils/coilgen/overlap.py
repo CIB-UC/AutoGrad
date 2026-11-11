@@ -1,16 +1,8 @@
-"""Detection of multi-wire congestion at pyCoilGen return-path crossings.
+"""Round-wire interference using exact distances between nonlocal 3D segments.
 
-Ordinary pyCoilGen crossings contain two branches and are resolved by moving
-one branch to the inner radial layer. The problematic case is a crossing whose
-two branches receive the same radial-layer displacement. In the known
-three-wire failure mode, one cable remains outside while the two inside form
-the colliding X.
-
-The old detector compared every pair of nearby 3-D segments. It consequently
-reported thousands of false collisions between neighbouring samples of the
-same continuous curve. This module instead consumes the exact 2-D crossing
-metadata captured by :func:`pyCoilGen.sub_functions.shift_return_paths` and
-checks pyCoilGen's actual layer assignment before grouping collision sites.
+Adjacent samples are excluded by physical arc length, including the seam.
+Manufacturing groove deformation never changes the conductor diameter.
+Crossing metadata is retained only for old diagnostics without a 3D path.
 """
 
 from __future__ import annotations
@@ -21,17 +13,21 @@ from typing import List, Tuple
 import numpy as np
 
 from .config import Config
+from pyCoilGen.helpers.wire_geometry import closed_wire_path, wire_contact_pairs
 
 
 @dataclass(frozen=True)
 class CollisionSite:
-    """One surface location occupied by three or more wire-path branches."""
+    """A cluster of interfering nonlocal branches (or legacy crossing metadata)."""
 
     part_index: int
     location_uv: Tuple[float, float]
     cable_count: int
     crossing_count: int
     segment_indices: Tuple[int, ...]
+    location_xyz_m: Tuple[float, float, float] | None = None
+    minimum_distance_m: float | None = None
+    required_separation_m: float | None = None
 
     @property
     def inner_layer_count(self) -> int:
@@ -54,6 +50,34 @@ class OverlapReport:
     def max_cables(self) -> int:
         return max((site.cable_count for site in self.sites), default=0)
 
+    def physical_interference_message(self, language: str = 'es') -> str:
+        """A measured physical failure cannot be overridden by confirmation."""
+        measured = [site for site in self.sites
+                    if site.minimum_distance_m is not None
+                    and site.required_separation_m is not None]
+        if not measured:
+            return ''
+        english = language == 'en'
+        lines = [('Round-wire interference detected:' if english else
+                  'Se detectó interferencia entre ramas del cable circular:')]
+        for index, site in enumerate(measured, 1):
+            distance = site.minimum_distance_m * 1000
+            diameter = site.required_separation_m * 1000
+            lines.append((f'• Location {index}: centerline distance {distance:.4g} mm; '
+                          f'required {diameter:.4g} mm.') if english else
+                         (f'• Lugar {index}: distancia entre ejes {distance:.4g} mm; '
+                          f'se requieren {diameter:.4g} mm.'))
+        lines.append(
+            'The pipeline stopped before leads and shell because automatic repair could '
+            'not obtain clearance within its limits. Review the available winding space '
+            '(radius and height), wire diameter, number of turns or interconnection route.'
+            if english else
+            'El pipeline se detuvo antes de los terminales y el molde porque la reparación '
+            'automática no consiguió la separación dentro de sus límites. Revise el espacio '
+            'disponible para el bobinado (radio y altura), el diámetro del cable, el número '
+            'de vueltas o el trazado de interconexión.')
+        return '\n'.join(lines)
+
     def user_question(self, language: str = "es") -> str:
         """Warning shown between gradient generation and leads/shell.
 
@@ -62,6 +86,9 @@ class OverlapReport:
         """
         if not self.sites:
             return ""
+        physical_failure = self.physical_interference_message(language)
+        if physical_failure:
+            return physical_failure
         if language == "en":
             if len(self.sites) == 1:
                 site = self.sites[0]
@@ -225,8 +252,44 @@ def _count_path_branches(path_positions: list[float], merge_distance: float) -> 
     return branches
 
 
+
+def _geometric_sites(part, part_index, cfg, tolerance):
+    path = np.asarray(part.wire_path.v, dtype=float).T
+    diameter = float(cfg.wire.conductor_width)
+    # A real pre-lead sweep closes its last ring onto its first, regardless of
+    # their distance. Keep support for genuinely open diagnostic-only paths.
+    closed = (getattr(part, 'layout_surface_mesh', None) is not None
+              or (getattr(part, 'clearance_report', None) or {}).get('closed_loop', False)
+              or np.linalg.norm(path[0] - path[-1]) <= diameter)
+    if closed:
+        path = closed_wire_path(path)
+    i, j, distances, positions = wire_contact_pairs(path, diameter, closed=closed)
+    if not len(i):
+        return []
+    # Clustering affects the number of displayed locations only. Every
+    # nonlocal segment pair closer than the real diameter has already failed.
+    centers = (path[i] + path[i+1] + path[j] + path[j+1]) / 4
+    records = [_CrossingRecord(center, int(a), int(b),
+                               float(positions[a]), float(positions[b]), 0., 0.)
+               for center, a, b in zip(centers, i, j)]
+    sites = []
+    for component in _cluster_records(records, tolerance):
+        component = np.asarray(component, int)
+        segments = tuple(map(int, sorted(set(i[component]) | set(j[component]))))
+        branch_positions = [float(positions[k]) for k in segments]
+        branches = max(2, _count_path_branches(branch_positions, 1.5*tolerance))
+        center = centers[component].mean(axis=0)
+        uv = getattr(part.wire_path, 'uv', None)
+        location = (np.asarray(uv)[:, segments].mean(axis=1) if uv is not None
+                    else center[:2])
+        sites.append(CollisionSite(part_index, tuple(map(float, location)), branches,
+                                   len(component), segments, tuple(map(float, center)),
+                                   float(distances[component].min()), diameter))
+    return sites
+
+
 def detect_collisions(solution, cfg: Config) -> OverlapReport:
-    """Return crossings whose branches are physically assigned to the same layer."""
+    """Check the real round conductor, including ramps outside UV crossings."""
     # A layer transition occupies space on both sides of its exact geometric
     # crossing. Treat crossings within 2.5 cable heights/widths as the same
     # congestion zone; this catches neighbouring crossings whose smoothed
@@ -240,9 +303,14 @@ def detect_collisions(solution, cfg: Config) -> OverlapReport:
     merge_distance = 1.5 * tolerance
     sites: list[CollisionSite] = []
     layer_shift = abs(float(cfg.normal_shift_length))
-    required_separation = float(cfg.cable_height)
+    required_separation = float(cfg.wire.conductor_width)
 
     for part_index, part in enumerate(getattr(solution, 'coil_parts', [])):
+        wire_path = getattr(part, 'wire_path', None)
+        if wire_path is not None and getattr(wire_path, 'v', None) is not None:
+            sites.extend(_geometric_sites(part, part_index, cfg, tolerance))
+            continue
+        # Compatibility for old metadata-only diagnostics without a 3D path.
         points, segments, positions, layers = _metadata_for_part(part)
         records = [
             _CrossingRecord(points[index], int(segments[index, 0]),

@@ -59,8 +59,8 @@ def interconnect_within_groups(coil_parts: List[CoilPart], input_args):
         if switch == 0:
             force_cut_selection = ['none'] * num_part_groups
         elif switch == 1:
-            if input_args.force_cut_selection[0] == 'high':
-                force_cut_selection = ['high'] * num_part_groups
+            if input_args.force_cut_selection[0] in ('high', 'low'):
+                force_cut_selection = [input_args.force_cut_selection[0]] * num_part_groups
             else:
                 force_cut_selection = ['none'] * num_part_groups
         else:

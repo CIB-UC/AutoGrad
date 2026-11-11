@@ -84,11 +84,20 @@ class WorkerRunner:
         }, on_done, ask_user, None)
 
     def _start(self, kind, cfg, extra, on_done, ask_user, on_progress):
+        language_var = getattr(self.root, 'language_var', None)
+        language = language_var.get() if language_var is not None else extra.get('question_language', 'en')
+        extra['question_language'] = language
+        target_cfg = getattr(cfg, 'base', cfg)
+        if target_cfg is not None and hasattr(target_cfg, 'output_language'):
+            target_cfg.output_language = language
         active = getattr(self.root, '_active_job_runner', None)
         if active is not None and active.is_running:
             self.log('>> A calculation is already running. Stop it before starting another.\n')
             self.start_polling()
             return False
+        if kind == 'pipeline':
+            from halbach_coils.coilgen.output_layout import prepare_run_directory
+            prepare_run_directory(cfg)
         self.root._active_job_runner = self
         self.stop_requested.clear()
         self._completion = None
@@ -107,7 +116,7 @@ class WorkerRunner:
             self.worker = context.Process(
                 target=execute_job,
                 args=(kind, cfg, extra, self._events, self._answers, gate, self.output_dir),
-                name=f'CoilGen-{kind}',
+                name=f'AutoGrad-{kind}',
             )
             self.worker.start()
             if os.name == 'nt':
@@ -213,7 +222,7 @@ class WorkerRunner:
         if self.progress is not None and status != 'partial':
             self.progress.configure(value=100 if error is None else 0)
         self.log('\n>> CANCELLED\n' if status == 'cancelled' else
-                 '\n>> INCOMPLETE — completed layers were kept.\n' if status == 'partial' else
+                 '\n>> INCOMPLETE — available results were kept.\n' if status == 'partial' else
                  f'\n>> ERROR: {error}\n' if error else '\n>> DONE\n')
         self._state_changed()
         if callback is not None:

@@ -1,4 +1,4 @@
-"""Validate and assemble three concentric formers without moving their coils.
+"""Validate and assemble selected concentric formers without moving their coils.
 
 Pipeline conductor STLs use metres; former STLs follow ``output_in_mm``.
 All CAD booleans here use millimetres. Final STL files use millimetres and the
@@ -8,6 +8,7 @@ GLB scene uses metres, keeping the physical XYZ frame and longitudinal Z.
 from __future__ import annotations
 
 from itertools import combinations
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -18,15 +19,21 @@ import tempfile
 import manifold3d as m3d
 import numpy as np
 import trimesh
+from pyCoilGen.helpers.wire_geometry import near_segment_pairs, segment_distances
 
-from .shell import export_validated_shell_stl
+from .shell import export_validated_shell_stl, load_shell_stl
 from .paths import infer_gradient_axis
 
 
 VOLUME_TOL_MM3 = 1e-6
+WIRE_TOL_MM = 1e-6
 PREFERRED_ANGLES = (202.5, 180.0)
 PART_COLORS = {'x': [180, 110, 215, 255], 'y': [220, 190, 70, 255],
                'z': [80, 185, 210, 255]}
+
+
+class AssemblyFeasibilityError(RuntimeError):
+    """The calculated parts cannot form a validated assembly as configured."""
 
 
 def trimesh_from_manifold(solid):
@@ -44,29 +51,34 @@ def _positive(value, name):
 
 
 def _configuration(batch, configs=None):
+    from .batch import mold_radial_gap
+
     if configs is None:
         from .batch import build_layer_configs
         configs = build_layer_configs(batch)
     configs = tuple(configs)
-    if len(configs) != 3 or {cfg.gradient_axis for cfg in configs} != {'x', 'y', 'z'}:
-        raise ValueError('Assembly requires exactly one Gx, Gy and Gz configuration.')
+    axes = tuple(cfg.gradient_axis for cfg in configs)
+    selected = tuple(str(axis).lower() for axis in batch.axis_order)
+    matches_selection = (axes == selected if batch.outer_radii is None
+                         else len(axes) == len(selected) and set(axes) == set(selected))
+    if (not axes or len(set(axes)) != len(axes) or not set(axes) <= {'x', 'y', 'z'}
+            or not matches_selection):
+        raise ValueError('Assembly configurations must match the selected gradients in layer order.')
     height = _positive(configs[0].cylinder.height, 'Cylinder height')
-    roi = np.array([configs[0].target.rx, configs[0].target.ry, configs[0].target.rz])
-    if not np.all(np.isfinite(roi)) or np.any(roi <= 0):
-        raise ValueError('Assembly ROI semi-axes must be finite and positive.')
     for cfg in configs:
+        roi = np.array([cfg.target.rx, cfg.target.ry, cfg.target.rz])
+        if not np.all(np.isfinite(roi)) or np.any(roi <= 0):
+            raise ValueError('Assembly ROI semi-axes must be finite and positive.')
         if (not np.allclose(cfg.rotated_cylinder_axis, [0, 0, 1], atol=1e-10)
                 or not math.isclose(cfg.cylinder.height, height, abs_tol=1e-10)
-                or cfg.b0_direction != configs[0].b0_direction
-                or not np.allclose([cfg.target.rx, cfg.target.ry, cfg.target.rz], roi,
-                                   atol=1e-12, rtol=0)):
-            raise ValueError('Assembly layers must share longitudinal Z, height, B0 and ROI.')
+                or cfg.b0_direction != configs[0].b0_direction):
+            raise ValueError('Assembly layers must share longitudinal Z, height and B0.')
         if cfg.shell.use_custom_stl or cfg.shell_inner_radius <= 0:
             raise ValueError('Assembly requires generated cylindrical formers with a positive bore.')
     for inner, outer in zip(configs, configs[1:]):
-        if outer.shell_inner_radius < inner.shell_outer_radius - 1e-10:
+        if mold_radial_gap(inner, outer) < -1e-10:
             raise ValueError('Former walls overlap or are not ordered inside to outside.')
-    if batch.include_keys:
+    if batch.include_keys and len(configs) > 1:
         length = _positive(batch.key_length, 'Key length')
         width = _positive(batch.key_width, 'Key width')
         clearance = _positive(batch.fit_clearance, 'Key fit clearance')
@@ -155,7 +167,7 @@ def _check_pair(first, second, kind, axes, checks):
     volume = _intersection_volume(first, second)
     if volume:
         labels = ' / '.join('G' + axis.upper() if axis in 'xyz' else axis for axis in axes)
-        raise RuntimeError(f'Assembly interference: {kind} {labels} overlap by {volume:.6g} mm³. '
+        raise AssemblyFeasibilityError(f'Assembly interference: {kind} {labels} overlap by {volume:.6g} mm³. '
                            'Individual designs were kept; no complete assembly was published.')
     checks.append({'kind': kind, 'axes': list(axes), 'intersection_mm3': 0.0})
 
@@ -176,7 +188,8 @@ def _roi_solid(cfg):
 
 
 def _one_output(root, group, pattern, label):
-    folder = root / group
+    from .output_layout import locate
+    folder = locate(root, group)
     candidates = sorted(folder.glob(pattern)) if folder.is_dir() else sorted(root.glob(pattern))
     if len(candidates) != 1:
         raise RuntimeError(f'{label}: expected one {pattern} in {folder}; found {len(candidates)}.')
@@ -187,14 +200,14 @@ def _load_layer(cfg, result):
     root = Path(result.output_dir).resolve()
     if getattr(result, 'discarded', False):
         raise RuntimeError(f'G{cfg.gradient_axis.upper()} was discarded; assembly cannot be completed.')
-    conductor_path = _one_output(root, 'Leads', '*_with_leads*.stl', 'Final conductor')
-    former_path = _one_output(root, 'Molde', '*.stl', 'Former')
+    conductor_path = _one_output(root, 'leads', '*_with_leads*.stl', 'Final conductor')
+    former_path = _one_output(root, 'mold', '*.stl', 'Former')
     if any(infer_gradient_axis(str(path)) not in (None, cfg.gradient_axis)
            for path in (conductor_path, former_path)):
         raise RuntimeError(f'G{cfg.gradient_axis.upper()}: output filenames belong to a different gradient axis.')
-    conductor = trimesh.load_mesh(conductor_path, process=True)
+    conductor = load_shell_stl(conductor_path, units='m')
     conductor.vertices *= 1000
-    former = trimesh.load_mesh(former_path, process=True)
+    former = load_shell_stl(former_path, units='mm' if cfg.shell.output_in_mm else 'm')
     if not cfg.shell.output_in_mm:
         former.vertices *= 1000
     axial = former.bounds[:, 2]
@@ -228,11 +241,66 @@ def _current_path(cfg, source):
     return path
 
 
-def _check_conductors(configs, conductors, roi, current_paths=None):
-    from .lead_surface import near_segment_pairs
+def _round_wire_hits_mesh(path, radius, mesh):
+    """Check the real-radius capsules of an open path against a CAD solid in mm."""
+    limit = radius - WIRE_TOL_MM
+    bounds = mesh.bounds
+    low = np.minimum(path[:-1], path[1:]) - radius
+    high = np.maximum(path[:-1], path[1:]) + radius
+    nearby = np.flatnonzero(np.all(high >= bounds[0], axis=1) & np.all(low <= bounds[1], axis=1))
+    if not len(nearby):
+        return False
+    tree, triangles, normals = mesh.triangles_tree, mesh.triangles, mesh.face_normals
+    for index in nearby:
+        faces = list(tree.intersection(np.r_[low[index], high[index]]))
+        if not faces:
+            continue
+        candidates = triangles[faces]
+        start, end = path[index:index + 2]
+        a = np.broadcast_to(start, (len(faces), 3))
+        b = np.broadcast_to(end, a.shape)
+        # For disjoint geometry the minimum occurs at an endpoint or an edge.
+        for endpoint in (a, b):
+            closest = trimesh.triangles.closest_point(candidates, endpoint)
+            if np.any(np.linalg.norm(closest - endpoint, axis=1) < limit):
+                return True
+        for edge in range(3):
+            if np.any(segment_distances(a, b, candidates[:, edge], candidates[:, (edge + 1) % 3]) < limit):
+                return True
+        # A segment can also pierce a triangle interior without touching an edge.
+        normal = normals[faces]
+        start_distance = np.einsum('ij,ij->i', a - candidates[:, 0], normal)
+        end_distance = np.einsum('ij,ij->i', b - candidates[:, 0], normal)
+        crosses = (start_distance * end_distance < 0)
+        if crosses.any():
+            t = start_distance[crosses] / (start_distance[crosses] - end_distance[crosses])
+            points = start + t[:, None] * (end - start)
+            closest = trimesh.triangles.closest_point(candidates[crosses], points)
+            if np.any(np.linalg.norm(closest - points, axis=1) <= WIRE_TOL_MM):
+                return True
+    # If the path starts inside and never approaches a face, it is still embedded.
+    return bool(np.all(path[0] >= bounds[0]) and np.all(path[0] <= bounds[1])
+                and mesh.contains(path[:1])[0])
+
+
+def _check_conductor_solid(cfg, groove, path, solid, mesh, kind, axes, checks):
+    if path is None:
+        _check_pair(groove, solid, kind, axes, checks)
+        return
+    if _round_wire_hits_mesh(path, cfg.wire.conductor_width * 500, mesh):
+        labels = ' / '.join('G' + axis.upper() if axis in 'xyz' else axis for axis in axes)
+        raise AssemblyFeasibilityError(f'Assembly interference: round {kind} {labels}. '
+                                       'Individual designs were kept; no complete assembly was published.')
+    checks.append({'kind': kind, 'axes': list(axes), 'model': 'round_wire_segment_capsules',
+                   'intersection_mm3': 0.0})
+
+
+def _check_conductors(configs, conductors, rois, current_paths=None):
+    if current_paths is None:
+        current_paths = [None] * len(configs)
     checks = []
-    for i, j in combinations(range(3), 2):
-        if current_paths is not None and current_paths[i] is not None and current_paths[j] is not None:
+    for i, j in combinations(range(len(configs)), 2):
+        if current_paths[i] is not None and current_paths[j] is not None:
             # The with_leads STL is the deformed groove subtraction tool, not
             # the round electrical cable. Segment capsules bound the real
             # round-wire surface, including every retained winding and lead.
@@ -240,8 +308,8 @@ def _check_conductors(configs, conductors, roi, current_paths=None):
             _a, _b, distances = near_segment_pairs(current_paths[i], current_paths[j], radius_sum)
             clearance = float(distances.min() - radius_sum) if len(distances) else 0.0
             axes = [configs[i].gradient_axis, configs[j].gradient_axis]
-            if clearance < -1e-6:
-                raise RuntimeError(f'Assembly interference: round conductor / conductor '
+            if clearance < -WIRE_TOL_MM:
+                raise AssemblyFeasibilityError(f'Assembly interference: round conductor / conductor '
                                    f'G{axes[0].upper()} / G{axes[1].upper()} have '
                                    f'{-clearance:.6g} mm of surface overlap. Individual designs were kept.')
             checks.append({'kind': 'conductor / conductor', 'axes': axes,
@@ -250,22 +318,29 @@ def _check_conductors(configs, conductors, roi, current_paths=None):
         else:
             _check_pair(conductors[i], conductors[j], 'conductor / conductor',
                         (configs[i].gradient_axis, configs[j].gradient_axis), checks)
-    for cfg, conductor in zip(configs, conductors):
-        _check_pair(conductor, roi, 'conductor / ROI', (cfg.gradient_axis, 'ROI'), checks)
+    # Each ROI belongs to its gradient's field target. It is not a shared
+    # keepout volume for the conductors or formers of other gradients.
+    for cfg, conductor, path, roi in zip(configs, conductors, current_paths, rois):
+        mesh = trimesh_from_manifold(roi) if path is not None else None
+        _check_conductor_solid(cfg, conductor, path, roi, mesh,
+                               'conductor / ROI', (cfg.gradient_axis, 'ROI'), checks)
     return checks
 
 
-def _check_formers(configs, formers, conductors, roi):
+def _check_formers(configs, formers, conductors, rois, current_paths):
     checks = []
-    for i, j in combinations(range(3), 2):
+    meshes = [trimesh_from_manifold(former) for former in formers] if any(
+        path is not None for path in current_paths) else [None] * len(formers)
+    for i, j in combinations(range(len(configs)), 2):
         _check_pair(formers[i], formers[j], 'former / former',
                     (configs[i].gradient_axis, configs[j].gradient_axis), checks)
-    for i, cfg in enumerate(configs):
+    for i, (cfg, roi) in enumerate(zip(configs, rois)):
         _check_pair(formers[i], roi, 'former / ROI', (cfg.gradient_axis, 'ROI'), checks)
         for j, other in enumerate(configs):
             if i != j:
-                _check_pair(conductors[i], formers[j], 'conductor / other former',
-                            (cfg.gradient_axis, other.gradient_axis), checks)
+                _check_conductor_solid(cfg, conductors[i], current_paths[i], formers[j], meshes[j],
+                                       'conductor / other former',
+                                       (cfg.gradient_axis, other.gradient_axis), checks)
     return checks
 
 
@@ -292,18 +367,75 @@ def _interface_record(batch, inner, outer, angle):
                                min(1.0, 500 * inner.shell_wall_thickness)}
 
 
-def _choose_keys(batch, configs, formers, conductors):
+def _mark_formers(batch, configs, formers):
+    """Choose one B0 side for selected layers and reserve it for key search."""
+    if not batch.include_b0_markers:
+        return formers, [], {'enabled': False}
+    from .shell_marker import mark_shell_b0, marker_radial_direction, MarkerPlacementError
+
+    radial, transverse = marker_radial_direction(configs[0])
+    for side in (1, -1):
+        marked, widths = [], []
+        tangent = np.cross([0., 0., 1.], radial)
+        try:
+            for cfg, former in zip(configs, formers):
+                marker_cfg = deepcopy(cfg)
+                marker_cfg.shell.b0_marker = True
+                # Reuse the pipeline's geometry, which expects metres.
+                original_m = former.scale((.001, .001, .001))
+                marked_m = mark_shell_b0([('shell', original_m)], marker_cfg, side=side)[0][1]
+                removed = trimesh_from_manifold(original_m - marked_m)
+                widths.append(float(np.ptp(removed.vertices @ tangent)) * 1000)
+                marked.append(marked_m.scale((1000., 1000., 1000.)))
+        except MarkerPlacementError:
+            continue
+        break
+    else:
+        raise MarkerPlacementError(
+            'No common clear B0 marker position exists for the selected gradients. '
+            'Disable the batch B0 marks or leave a clear rim on the same B0 side for all selected gradients.')
+
+    direction = side * radial
+    angle = float(np.rad2deg(np.arctan2(direction[1], direction[0])) % 360)
+    # Reserve the whole radial line, including the receiving slots, with half
+    # a marker width of clearance on each side. An actual cavity alone would
+    # not catch an outer-edge key at the same azimuth as an end-face mark.
+    width = max(widths)
+    height = 1000 * configs[0].cylinder.height
+    radius = 1000 * configs[-1].shell_outer_radius
+    keepout = _radial_box(0, radius + width, 2 * width, -height/2 - width,
+                          height/2 + width, angle)
+    print(f'  Batch B0 marks aligned at {angle:.6g} degrees; reserving their azimuth for keys.', flush=True)
+    return marked, [keepout], {
+        'enabled': True, 'common_side': side, 'radial_direction': direction.tolist(),
+        'angle_deg': angle, 'placement': 'end_faces' if transverse else 'outer_wall',
+        'key_clearance_mm': width / 2, 'keepout_width_mm': 2 * width,
+        'layer_axes': [cfg.gradient_axis for cfg in configs],
+    }
+
+
+def _choose_keys(batch, configs, formers, conductors, current_paths, marker_keepouts=()):
     """Deterministic joint search; coil geometry and its azimuth stay unchanged."""
+    wire_data = [(path, cfg.wire.conductor_width * 500, groove)
+                 for cfg, path, groove in zip(configs, current_paths, conductors)]
+
+    def obstructs_wire(feature):
+        mesh = trimesh_from_manifold(feature) if any(path is not None for path in current_paths) else None
+        return any(_round_wire_hits_mesh(path, radius, mesh) if path is not None
+                   else _intersection_volume(feature, groove) for path, radius, groove in wire_data)
+
     def search(index, selected):
-        if index == 2:
+        if index == len(configs) - 1:
             return selected
         inner, outer = configs[index:index + 2]
         for angle in _candidate_angles(PREFERRED_ANGLES[index]):
             male, female = _key_manifolds(batch, inner, outer, angle)
+            if any(_intersection_volume(feature, keepout)
+                   for feature in (male, female) for keepout in marker_keepouts):
+                continue
             if not _intersection_volume(male, formers[index]):
                 continue
-            if any(_intersection_volume(feature, conductor)
-                   for feature in (male, female) for conductor in conductors):
+            if obstructs_wire(male) or obstructs_wire(female):
                 continue
             if any(_intersection_volume(feature, prior_feature)
                    for feature in (male, female) for prior in selected
@@ -316,7 +448,7 @@ def _choose_keys(batch, configs, formers, conductors):
 
     selected = search(0, [])
     if selected is None:
-        raise RuntimeError('No safe key azimuth was found without crossing a conductor or another key. '
+        raise AssemblyFeasibilityError('No safe key azimuth was found without crossing a conductor, B0 mark or another key. '
                            'Individual designs were kept; no complete assembly was published.')
     final = list(formers)
     interfaces = []
@@ -339,59 +471,72 @@ def finalize_batch(batch, configs, results):
     when keys are disabled.
     """
     configs = _configuration(batch, configs)
-    if len(results) != 3:
-        raise ValueError('Assembly requires three completed pipeline results.')
+    if len(results) != len(configs):
+        raise ValueError('Assembly requires a completed pipeline result for each selected gradient.')
     root = Path(batch.output_dir).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    destination = root / 'Conjunto'
+    from .output_layout import name, variants
+    language = configs[0].output_language
+    destination = root / name('assembly', language)
+    if any((root / item).exists() for item in variants('assembly')):
+        raise FileExistsError('Assembly already exists; refusing to overwrite.')
     if destination.exists():
         raise FileExistsError(f'Assembly already exists; refusing to overwrite: {destination}')
     loaded = [_load_layer(cfg, result) for cfg, result in zip(configs, results)]
     formers, conductors, sources = map(list, zip(*loaded))
-    roi, roi_inflation = _roi_solid(configs[0])
+    rois, roi_inflations = zip(*(_roi_solid(cfg) for cfg in configs))
     current_paths = [_current_path(cfg, source) for cfg, source in zip(configs, sources)]
-    conductor_checks = _check_conductors(configs, conductors, roi, current_paths)
-    _check_formers(configs, formers, conductors, roi)
+    if batch.groove_dimensions is not None and any(path is None for path in current_paths):
+        raise RuntimeError('Final current paths are required to check the real cable in the assembly.')
+    conductor_checks = _check_conductors(configs, conductors, rois, current_paths)
+    _check_formers(configs, formers, conductors, rois, current_paths)
+    formers, marker_keepouts, marker_record = _mark_formers(batch, configs, formers)
     interfaces = []
-    if batch.include_keys:
+    if batch.include_keys and len(configs) > 1:
         print('  Checking assembly key positions against all final conductors...', flush=True)
-        formers, interfaces = _choose_keys(batch, configs, formers, conductors)
+        formers, interfaces = _choose_keys(batch, configs, formers, conductors, current_paths, marker_keepouts)
 
-    staging = Path(tempfile.mkdtemp(prefix='.conjunto-', dir=root))
+    staging = Path(tempfile.mkdtemp(prefix='.assembly-', dir=root))
     try:
         part_paths, exported, scene = {}, [], trimesh.Scene()
         for cfg, former in zip(configs, formers):
-            name = f'G{cfg.gradient_axis}_molde.stl'
-            mesh = export_validated_shell_stl(trimesh_from_manifold(former), staging / name)
+            filename = f"G{cfg.gradient_axis}_{'molde' if language == 'es' else 'mold'}.stl"
+            mesh = export_validated_shell_stl(trimesh_from_manifold(former), staging / filename)
             exported.append(_solid(mesh, f'G{cfg.gradient_axis.upper()} exported former', one_part=True))
-            part_paths[cfg.gradient_axis] = str(destination / name)
+            part_paths[cfg.gradient_axis] = str(destination / filename)
             display = mesh.copy()
             display.vertices *= .001
             display.visual.face_colors = PART_COLORS[cfg.gradient_axis]
             scene.add_geometry(display, node_name=f'G{cfg.gradient_axis}', geom_name=f'G{cfg.gradient_axis}')
-        checks = conductor_checks + _check_formers(configs, exported, conductors, roi)
+        checks = conductor_checks + _check_formers(configs, exported, conductors, rois, current_paths)
         scene.metadata.update({'units': 'm', 'coordinate_frame': 'physical_xyz',
                                'longitudinal_axis': 'z'})
         scene.units = 'm'
-        scene_name, report_name = 'Gradientes.glb', 'encajes.json'
+        scene_name, report_name = name('scene', language), name('keys', language)
         (staging / scene_name).write_bytes(scene.export(file_type='glb'))
         reloaded = trimesh.load(staging / scene_name, force='scene')
-        if len(reloaded.geometry) != 3 or not np.allclose(reloaded.bounds, scene.bounds, atol=1e-7):
-            raise RuntimeError('Exported assembly GLB did not preserve the three physical geometries.')
+        if len(reloaded.geometry) != len(configs) or not np.allclose(reloaded.bounds, scene.bounds, atol=1e-7):
+            raise RuntimeError('Exported assembly GLB did not preserve the selected physical geometries.')
         report = {'format_version': 1, 'status': 'complete', 'units': 'mm',
                   'conductor_geometry_model': ('round_wire_segment_capsules'
                                                if all(path is not None for path in current_paths)
                                                else 'manufacturing_groove_envelope_legacy'),
-                  'mold_and_key_clearance_model': 'manufacturing_groove_envelope',
+                  'mold_and_key_clearance_model': ('round_wire_segment_capsules'
+                                                   if all(path is not None for path in current_paths)
+                                                   else 'manufacturing_groove_envelope_legacy'),
                   'scene_units': 'm', 'coordinate_frame': 'physical_xyz',
                   'longitudinal_axis': 'z', 'angle_reference': '+X towards +Y about +Z',
                   'layer_order': [cfg.gradient_axis for cfg in configs],
                   'b0_direction': configs[0].b0_direction,
                   'roi_mm': [1000 * configs[0].target.rx, 1000 * configs[0].target.ry,
                              1000 * configs[0].target.rz],
-                  'roi_conservative_scale': roi_inflation,
+                  'roi_by_gradient_mm': {cfg.gradient_axis: [1000 * cfg.target.rx,
+                      1000 * cfg.target.ry, 1000 * cfg.target.rz] for cfg in configs},
+                  'roi_validation_scope': 'own_gradient',
+                  'roi_conservative_scale': max(roi_inflations),
                   'intersection_tolerance_mm3': VOLUME_TOL_MM3,
                   'include_keys': bool(batch.include_keys), 'interfaces': interfaces,
+                  'b0_markers': marker_record,
                   'checks': checks, 'sources': sources, 'part_paths': part_paths,
                   'scene_path': str(destination / scene_name),
                   'report_path': str(destination / report_name),
@@ -401,9 +546,10 @@ def finalize_batch(batch, configs, results):
         (staging / report_name).write_text(json.dumps(report, indent=2, ensure_ascii=False,
                                                      allow_nan=False) + '\n', encoding='utf-8')
         staging.replace(destination)
-        print('  Assembly validated: three formers, final conductors and shared ROI.', flush=True)
+        print(f'  Assembly validated: {len(configs)} formers and final conductors, each against its own ROI.', flush=True)
         return {'part_paths': part_paths, 'scene_path': report['scene_path'],
                 'report_path': report['report_path'], 'interfaces': interfaces,
+                'b0_markers': marker_record,
                 'units': 'mm', 'scene_units': 'm', 'coordinate_frame': 'physical_xyz'}
     finally:
         if staging.exists():

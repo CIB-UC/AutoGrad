@@ -162,7 +162,7 @@ def compute_metrics(solution,
     metrics_path = os.path.join(output_dir, f"{project_name}_metrics.txt")
     with open(metrics_path, 'w', encoding='utf-8') as fh:
         fh.write("# Preliminary CoilGen wire metrics (before terminal leads)\n")
-        fh.write("# Final conductor / FastHenry values: see Resumen.txt and Leads/*_final_metrics.json\n")
+        fh.write("# Final conductor / FastHenry values: see the run summary and Leads/*_final_metrics.json\n")
         fh.write(f"project_name              = {project_name}\n")
         fh.write(f"gradient_axis             = {gradient_axis}\n")
         fh.write(f"internal_axis             = {internal_axis}\n")

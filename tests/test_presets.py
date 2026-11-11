@@ -75,7 +75,8 @@ def test_selected_sweep_row_is_applied_to_pipeline():
     panel = object.__new__(SweepPanel)
     panel.root = root
     panel.tree = type('Tree', (), {'selection': lambda _self: ('row-1',)})()
-    panel._rows_by_item = {'row-1': {'Tikhonov': 9876.0}}
+    panel._rows_by_item = {'row-1': {'Tikhonov': 9876.0, 'Geometry_status': 'valid',
+                                   'Pendiente_mT_per_m_per_A': 2., 'Error_Medio_pct': 1.}}
     panel._last_sweep_cfg = Config(gradient_axis='z', tikhonov_factor=1)
     root.pipeline_panel = type('Pipeline', (), {
         'apply_config': lambda _self, cfg: applied.append(cfg),

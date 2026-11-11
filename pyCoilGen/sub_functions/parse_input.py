@@ -222,8 +222,14 @@ def parse_input(parse_cli=True):
     # Add smoothing parameters regarding the normal shift
     parser.add_argument('--normal_shift_smooth_factors', nargs='+', type=int,
                         default=[2, 3, 2], help="Smoothing parameters regarding the normal shift")
+    parser.add_argument('--reassign_crossing_layers', type=bool, default=True,
+                        help='Allow joint reassignment of interacting crossings to radial layers')
+    parser.add_argument('--save_return_path_trace', type=bool, default=False,
+                        help='Save versioned layer decisions and geometry stages for exact replay')
 
     # Flag to skip the generation of a volumetric (3D) coil body
+    parser.add_argument('--auto_wire_clearance', type=bool, default=False,
+                        help='Attempt bounded turn separation on generated cylinders before sweeping')
     parser.add_argument('--skip_sweep', type=bool, default=False,
                         help="Flag to skip the generation of a volumetric (3D) coil body")
 
@@ -275,9 +281,10 @@ def parse_input(parse_cli=True):
     parser.add_argument('--conductor_cross_section_area', type=float, default=0.0,
                         help="Real conductor area for resistance calculations in square metres")
 
-    # Add the conductor conductivity
+    # Legacy argument name: the value has always entered the matrix as rho.
     parser.add_argument('--specific_conductivity_conductor',
-                        type=float, default=0.018e-6, help="Conductor conductivity")
+                        type=float, default=0.018e-6,
+                        help="Conductor resistivity rho in ohm metres (legacy parameter name; not conductivity in S/m)")
 
     # Add the thickness of the sheet current density within the stream function representation
     parser.add_argument('--conductor_thickness', type=float, default=0.005,

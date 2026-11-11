@@ -216,6 +216,44 @@ def final_current_path(reference, lead_parts, report):
     return path
 
 
+def ordered_groove_sweep(reference, lead_parts, final_mesh, report):
+    """Preserve exact section coordinates and side diagonals for solid union.
+
+    A closed sweep may overlap itself where manufacturing grooves cross.
+    Its indexed surface alone is not a Boolean union of those volumes.
+    Keep each original side triangle so the shell can union capped segments.
+    """
+    left, right = report['cut_indices']
+    order = np.arange(right, right+(left-right) % len(reference.rings)+1) % len(reference.rings)
+    first, second = lead_parts
+    rings = np.concatenate((second.rings[:0:-1], reference.rings[order], first.rings[1:]))
+    corners = rings.shape[1]
+    coil_count, first_count, second_count = len(order), len(first.rings), len(second.rings)
+    # attach() stores the retained coil, first lead (excluding its shared
+    # ring), its end cap, then the second lead and its end cap.
+    mapping = np.full(len(final_mesh.vertices), -1, dtype=int)
+    mapping[:coil_count*corners] = np.arange(coil_count*corners)+(second_count-1)*corners
+    start = coil_count*corners
+    mapping[start:start+(first_count-1)*corners] = (
+        np.arange((first_count-1)*corners)+(second_count-1+coil_count)*corners)
+    start += (first_count-1)*corners+1
+    mapping[start:start+(second_count-1)*corners] = (
+        (second_count-2-np.arange(second_count-1))[:, None]*corners+np.arange(corners)).ravel()
+    selected = mapping >= 0
+    if not np.array_equal(final_mesh.vertices[selected], rings.reshape(-1, 3)[mapping[selected]]):
+        raise GeometryRejected('Ordered groove sections do not match the final conductor.')
+    faces = mapping[final_mesh.faces]
+    faces = faces[(faces >= 0).all(axis=1)]  # exclude the two terminal caps
+    groups = faces.min(axis=1)//corners
+    if (not np.all(faces.max(axis=1)//corners == groups+1)
+            or not np.array_equal(np.bincount(groups, minlength=len(rings)-1),
+                                  np.full(len(rings)-1, 2*corners))):
+        raise GeometryRejected('Final groove faces do not follow consecutive sections.')
+    sides = faces[np.argsort(groups, kind='stable')].reshape(len(rings)-1, 2*corners, 3)
+    sides = sides-np.arange(len(rings)-1)[:, None, None]*corners
+    return rings, sides
+
+
 def _export_m(mesh: trimesh.Trimesh, path: str, *, must_be_closed: bool) -> None:
     """Export metres for the existing shell stage and verify the reloaded STL."""
     if os.path.exists(path):
@@ -276,15 +314,21 @@ def run_leads(cfg: Config, input_stl: Optional[str] = None) -> tuple[str, str, s
         raise GeometryRejected('Lead exit direction is perpendicular to the saved cylinder axis.')
     exit_sign = 1 if projection > 0 else -1
     options = _automatic_options(reference, cfg)
+    # Normal design validates the real circular cable. Conservative groove
+    # and bend recommendations must not prevent terminal generation.
+    options.strict_manufacturing = False
+    options.conductor_diameter = float(cfg.wire.conductor_width)
     options.sector_angular_half = float(preset.sector_angular_half)
     print('\nGenerating surface leads from the original sweep sections...')
     print(f'  Radial x transverse profile: {2*reference.semi_a*1000:.3f} x '
           f'{2*reference.semi_b*1000:.3f} mm')
-    print(f'  Minimum bend radius: {options.min_bend_radius*1000:.3f} mm')
+    print(f'  Recommended bend radius: {options.min_bend_radius*1000:.3f} mm (advisory)')
+    print(f'  Required round-wire clearance: {options.conductor_diameter*1000:.3f} mm')
     final, lead_parts, open_mesh, report = _plan_with_sector_fallback(
         reference, preset, exit_sign, options,
-        expand_cut_search=cfg.gradient_axis.lower() == 'z')
+        expand_cut_search=True)
     current_path = final_current_path(reference, lead_parts, report)
+    groove_rings, groove_sides = ordered_groove_sweep(reference, lead_parts, final, report)
     source_hash = _file_sha256(input_stl)
     report.update(current_path_units='m', coordinate_frame='physical_xyz',
                   current_path_source=os.path.abspath(lead_reference_path(input_stl)),
@@ -324,6 +368,8 @@ def run_leads(cfg: Config, input_stl: Optional[str] = None) -> tuple[str, str, s
             cut_indices=np.asarray(report['cut_indices'], dtype=np.int64),
             units=np.asarray('m'), coordinate_frame=np.asarray('physical_xyz'),
             orientation=np.asarray('original_coil_current'),
+            groove_format_version=np.asarray(1),
+            groove_rings=groove_rings, groove_side_faces=groove_sides,
             supply_return_included=np.asarray(False), source_sha256=np.asarray(source_hash),
             with_leads_sha256=np.asarray(with_leads_hash),
             gradient_axis=np.asarray(gradient_axis), b0_direction=np.asarray(b0_direction),
@@ -339,6 +385,8 @@ def run_leads(cfg: Config, input_stl: Optional[str] = None) -> tuple[str, str, s
             for destination in published:
                 os.unlink(destination)
             raise
+    for warning in report.get("warnings", []):
+        print(f"  Lead note: {warning}")
     print(f'  Cut removed: {report["cut_removed_arc_mm"]:.3f} mm')
     print(f'  Leads STL: {output_stl}')
     print(f'  Final current path: {final_path_file}')

@@ -11,9 +11,7 @@ from pyCoilGen.helpers.common import title_to_filename
 
 log = logging.getLogger(__name__)
 
-# Note: This function has been auto-converted from MATLAB to Python.
-# Conversion by: Claude Sonnet 4, in Agent Mode, 27/6/2025.
-# It has not been tested in any way.
+# MATLAB-to-Python plotting port; dedicated validation is not yet available.
 
 def plot_coil_track_with_resulting_bfield(coil_layouts: List[CoilSolution], single_ind_to_plot: int, plot_title: str, save_dir=None, dpi=100):
     """

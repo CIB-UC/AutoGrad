@@ -10,6 +10,7 @@ where three or more wire branches compete for the same two radial layers.
 from __future__ import annotations
 
 import logging
+import json
 import os
 from contextlib import contextmanager
 from typing import Optional, Tuple
@@ -56,7 +57,8 @@ def run_gradient(
 
     ``output_dir`` defaults to ``cfg.output_dir`` (or a freshly allocated
     pipeline run folder). ``project_stem`` defaults to a unique stem inside
-    the output dir. ``check_overlap`` defaults to ``cfg.overlap_warn``.
+    the output dir. ``check_overlap`` controls diagnostic verbosity (default:
+    cfg.overlap_warn). A physical feasibility report is always returned.
     """
     from pyCoilGen.pyCoilGen_release import pyCoilGen
     from .advanced import validate_advanced_config
@@ -103,8 +105,7 @@ def run_gradient(
 
     # ----- arg dict --------------------------------------------------------
     cyl = cfg.cylinder
-    # Shell length = cylinder.height (GUI). Wire mesh = height × 0.95 for
-    # every gradient axis (x/y/z) so grooves stay clear of the rim.
+    # The factor maps the full shell length to this gradient's winding length.
     mesh_height = float(cyl.height) * float(cyl.mesh_length_factor)
     cylinder_mesh_parameter_list = [
         mesh_height, cfg.cylinder_design_radius,
@@ -127,11 +128,14 @@ def run_gradient(
         'conductor_cross_section_height': cfg.fasthenry_conductor_height,
         'conductor_cross_section_area':   cfg.electrical_cross_section_area,
         'conductor_thickness':            cfg.wire.conductor_width,
-        'specific_conductivity_conductor': cfg.fasthenry.specific_conductivity,
+        'specific_conductivity_conductor': cfg.fasthenry.resistivity_ohm_m,
         'cross_sectional_points':        cfg.cross_sectional_points.tolist(),
         'normal_shift_length':           cfg.normal_shift_length,
         'normal_shift_smooth_factors':   cfg.winding.normal_shift_smooth,
+        'reassign_crossing_layers':      cfg.winding.reassign_crossing_layers,
+        'save_return_path_trace':        True,
         'skip_postprocessing':          False,
+        'auto_wire_clearance':          True,
         'skip_inductance_calculation':  True,
         'fasthenry_bin':                fh_resolved,
         'smooth_factor':                cfg.winding.smooth_factor,
@@ -199,15 +203,41 @@ def run_gradient(
         sidecars.append(reference_path)
     save_design_state(wire_path, cfg, sidecar_paths=sidecars)
 
-    # ----- Multi-wire crossing check --------------------------------------
-    overlap_report: Optional[OverlapReport] = None
+    # Physical feasibility is mandatory; the old flag controls verbosity only.
+    overlap_report = detect_collisions(solution, cfg)
+    from pyCoilGen.helpers.return_path_distribution import solution_return_path_distribution
+    from pyCoilGen.sub_functions.return_path_trace import save_return_path_traces
+    distribution = solution_return_path_distribution(solution.coil_parts, solution.input_args)
+    metrics['return_path_distribution'] = distribution
+    save_return_path_traces(solution.coil_parts, solution.input_args, stage='final')
+    geometry = {
+        'status': 'valid' if overlap_report.n_collisions == 0 and distribution['status']!='unresolved' else 'needs_revision',
+        'return_path_distribution': distribution,
+        'stage': 'coil_only', 'required_separation_mm': cfg.wire.conductor_width*1000,
+        'collision_sites': overlap_report.n_collisions,
+        'minimum_found_mm': min((site.minimum_distance_m*1000
+                                for site in overlap_report.sites
+                                if site.minimum_distance_m is not None), default=None),
+        'parts': [getattr(part, 'clearance_report', {'status': 'not_attempted'})
+                  for part in solution.coil_parts],
+        'return_paths': [getattr(part, 'return_path_report', {'status': 'not_recorded'})
+                         for part in solution.coil_parts],
+    }
+    if geometry['minimum_found_mm'] is None:
+        geometry['minimum_found_mm'] = min((part['minimum_mm'] for part in geometry['parts']
+                                           if part.get('minimum_mm') is not None), default=None)
+    geometry_path = os.path.join(output_dir, project_stem + '_geometry.json')
+    with open(geometry_path, 'w', encoding='utf-8') as handle:
+        json.dump(geometry, handle, indent=2, allow_nan=False)
+        handle.write('\n')
+    metrics['geometry_report'] = geometry
+    metrics['geometry_report_path'] = geometry_path
     if (check_overlap if check_overlap is not None else cfg.overlap_warn):
-        overlap_report = detect_collisions(solution, cfg)
         if overlap_report.n_collisions > 0:
-            print(f"\n  MULTI-WIRE WARNING: {overlap_report.n_collisions} congested "
-                  f"location(s); up to {overlap_report.max_cables} cables share one place.")
+            print(f"\n  Wire clearance: {overlap_report.n_collisions} area(s) below the "
+                  f"required {cfg.wire.conductor_width*1000:.4g} mm centerline separation.")
         else:
-            print("\n  Multi-wire check OK: no location contains 3 or more cables.")
+            print("\n  Round-wire interference check OK: no nonlocal branches overlap.")
 
     # ----- Wire radial extent vs analytical shell -------------------------
     try:

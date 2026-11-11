@@ -12,6 +12,10 @@ import re
 from dataclasses import dataclass
 
 
+DEFAULT_CYLINDER_N_CIRC = 100
+DEFAULT_CYLINDER_N_LONG = 40
+
+
 @dataclass
 class AdvancedConfig:
     gauss_order: int = 2
@@ -22,6 +26,7 @@ class AdvancedConfig:
     minimize_method: str = 'SLSQP'
     maxiter: int = 100
     tol: float = 1e-6
+    connection_cut_side: str = 'auto'
 
     def validate(self) -> None:
         for spec in PARAMETERS:
@@ -39,6 +44,8 @@ class AdvancedConfig:
             'iteration_num_mesh_refinement': parsed['iteration_num_mesh_refinement'],
             'level_set_method': parsed['level_set_method'],
             'cut_plane_definition': parsed['cut_plane_definition'],
+            'force_cut_selection': ([] if parsed['connection_cut_side'] == 'auto'
+                                    else [parsed['connection_cut_side']]),
             'sf_opt_method': parsed['sf_opt_method'],
             'minimize_method': parsed['minimize_method'],
             'minimize_method_parameters': repr({'tol': parsed['tol']}),
@@ -111,15 +118,15 @@ class ParameterSpec:
 # Labels include display units. cut_width is the sole value shown in mm;
 # all Config lengths remain in metres.
 PARAMETERS = (
-    ParameterSpec('cylinder.n_circ', 'mesh', 'Circumferential divisions', 'Divisiones circunferenciales', 200, 'int',
+    ParameterSpec('cylinder.n_circ', 'mesh', 'Circumferential divisions', 'Divisiones circunferenciales', DEFAULT_CYLINDER_N_CIRC, 'int',
                   'Cylinder samples around the bore (8–720). More samples resolve winding shape better but increase memory and solve time.',
                   'Muestras alrededor del cilindro (8–720). Más muestras detallan mejor el trazado y aumentan memoria y tiempo.', 8, 720),
-    ParameterSpec('cylinder.n_long', 'mesh', 'Longitudinal divisions', 'Divisiones longitudinales', 10, 'int',
+    ParameterSpec('cylinder.n_long', 'mesh', 'Longitudinal divisions', 'Divisiones longitudinales', DEFAULT_CYLINDER_N_LONG, 'int',
                   'Cylinder divisions along the bore (2–100). A finer axial mesh adds design freedom and increases solve cost.',
                   'Divisiones a lo largo del cilindro (2–100). Una malla axial fina agrega libertad de diseño y aumenta el costo del cálculo.', 2, 100),
-    ParameterSpec('cylinder.mesh_length_factor', 'mesh', 'Winding length / shell length', 'Largo del bobinado / largo del molde', 0.95, 'float',
-                  'Dimensionless factor, greater than 0 and at most 1. The winding mesh uses this fraction of shell length; 0.95 reserves space at both ends.',
-                  'Factor sin unidades, mayor que 0 y hasta 1. La malla usa esta fracción del largo del molde; 0.95 reserva espacio en ambos extremos.', 0, 1, positive=True),
+    ParameterSpec('cylinder.mesh_length_factor', 'mesh', 'Winding length factor', 'Factor de largo del bobinado', 0.95, 'float',
+                  'Fraction of the entered length used by the centered winding mesh. Use a value greater than 0 and at most 1. In Batch design the factor applies to each gradient length.',
+                  'Fracción del largo ingresado que ocupa la malla de bobinado centrada. Usa un valor mayor que 0 y hasta 1. En Diseño en lote se aplica al largo de cada gradiente.', 0, 1, positive=True),
     ParameterSpec('advanced.iteration_num_mesh_refinement', 'mesh', 'Mesh refinement passes', 'Pasadas de refinamiento', 0, 'int',
                   'Each pass splits each triangle into four (0–3 passes). Memory can rise sharply; the preview shows the selected effective mesh density.',
                   'Cada pasada divide cada triángulo en cuatro (0–3). La memoria puede aumentar mucho; la vista previa muestra la densidad efectiva seleccionada.', 0, 3),
@@ -150,6 +157,9 @@ PARAMETERS = (
     ParameterSpec('advanced.cut_plane_definition', 'winding', 'Connection cut orientation', 'Orientación del corte de conexión', 'nearest', 'choice',
                   'nearest selects a nearby loop direction when its normal is parallel to B0; B0 uses a field-aligned fallback. Changes the cut position only in this degenerate case.',
                   'nearest elige la dirección de un lazo cercano cuando su normal es paralela a B0; B0 usa una alternativa alineada al campo. Solo cambia el corte en ese caso degenerado.', choices=('nearest', 'B0')),
+    ParameterSpec('advanced.connection_cut_side', 'winding', 'Connection cut side', 'Lado del corte de conexión', 'auto', 'choice',
+                  'auto preserves the original high-side selection; low and high explicitly choose the engine connection side. Every route requires physical interference validation.',
+                  'auto conserva el corte original por el lado alto; low y high eligen explícitamente el lado del motor. Toda ruta requiere comprobar interferencias físicas.', choices=('auto', 'low', 'high')),
     ParameterSpec('advanced.gauss_order', 'solver', 'Gauss integration order', 'Orden de integración de Gauss', 2, 'int',
                   'Quadrature order per triangle (1–8). Each triangle uses order² integration points. Higher orders can improve integration but cost more time.',
                   'Orden de cuadratura por triángulo (1–8). Cada triángulo usa orden² puntos de integración. Un orden alto mejora la integración y requiere más tiempo.', 1, 8),

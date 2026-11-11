@@ -28,7 +28,7 @@ import numpy as np
 
 from . import geometry as geo
 from . import paths as _paths
-from .advanced import AdvancedConfig
+from .advanced import AdvancedConfig, DEFAULT_CYLINDER_N_CIRC, DEFAULT_CYLINDER_N_LONG
 
 
 # Electrical resistivity at approximately 20 °C [ohm.m].  pyCoilGen's
@@ -100,6 +100,11 @@ class WireConfig:
     cross_section_a_frac: float = 2.0
     cross_section_b_frac: float = 1.0
 
+    def set_groove_dimensions(self, radial_height: float, tangential_width: float) -> None:
+        """Store the groove dimensions in metres as factors of the cable diameter."""
+        self.cross_section_a_frac = radial_height / self.conductor_width
+        self.cross_section_b_frac = tangential_width / self.conductor_width
+
 
 @dataclass
 class TargetConfig:
@@ -114,8 +119,8 @@ class TargetConfig:
 class CylinderConfig:
     height: float = 0.430                      # [m] requested shell / cylinder length
     radius: float = 0.039                      # [m] physical outer radius
-    n_circ: int = 200
-    n_long: int = 10
+    n_circ: int = DEFAULT_CYLINDER_N_CIRC
+    n_long: int = DEFAULT_CYLINDER_N_LONG
     rot_axis: tuple = (0, 1, 0)
     rot_angle: float = 0.0
     # pyCoilGen mesh axial length = height * this (< 1 keeps windings short of
@@ -134,6 +139,7 @@ class WindingConfig:
     layer_gap_mm: float = 0.0                   # [m] radial gap at layer crossing
     normal_shift_height_factor: float = 1.40    # legacy; ignored when layer_gap_mm set
     normal_shift_smooth: list = field(default_factory=lambda: [7, 7, 7])
+    reassign_crossing_layers: bool = True
     smooth_factor: int = 3
 
 
@@ -143,6 +149,19 @@ class FastHenryConfig:
     bin_path: str = ''                         # empty -> resolve via PATH
     material: str = 'Cu'
     specific_conductivity: float = CONDUCTOR_MATERIAL_RESISTIVITY['Cu']  # resistivity [ohm.m]
+
+    @property
+    def resistivity_ohm_m(self) -> float:
+        """Canonical SI name; keep the legacy field for existing presets."""
+        return self.specific_conductivity
+
+    @resistivity_ohm_m.setter
+    def resistivity_ohm_m(self, value: float):
+        self.specific_conductivity = value
+
+    @property
+    def conductivity_s_per_m(self) -> float:
+        return 1.0 / self.resistivity_ohm_m
 
 
 @dataclass
@@ -178,6 +197,9 @@ class LeadsConfig:
 
 @dataclass
 class ShellConfig:
+    # Single-design pipeline toggle. Batch marks are coordinated at assembly
+    # time by BatchConfig.include_b0_markers, rather than per layer.
+    b0_marker: bool = False
     layer: int = 2                             # 2 -> g_2a/b, 3 -> g_3a/b (assets/shells, CLI legacy)
     stl_dir: str = ''                          # empty -> assets/shells
     use_custom_stl: bool = False
@@ -281,6 +303,7 @@ class SweepConfig:
     n_coarse: int = 10
     fine: bool = True
     n_fine: int = 7
+    processes: int = 1
 
 
 @dataclass
@@ -313,11 +336,14 @@ class Config:
     advanced: AdvancedConfig = field(default_factory=AdvancedConfig)
 
     output_dir: str = ''                       # run output folder
+    output_language: str = 'en'                # presentation only; GUI snapshots its language
     show_plots: bool = True
-    overlap_warn: bool = True                  # warn about 3+ cables sharing a zone
+    overlap_warn: bool = True                  # verbose diagnostics; physical checks always run
     overlap_clearance: float = 1.0             # multiplier for multi-wire zone footprint
 
     def __post_init__(self) -> None:
+        if self.output_language not in ('en', 'es'):
+            raise ValueError('Output language must be en or es.')
         if self.gradient_axis.lower() not in ('x', 'y', 'z'):
             raise ValueError(f"gradient_axis must be 'x', 'y' or 'z', got {self.gradient_axis!r}")
         self.gradient_axis = self.gradient_axis.lower()
@@ -624,6 +650,7 @@ class Config:
             'normal_shift_height_factor': self.winding.normal_shift_height_factor,
             'normal_shift_smooth': self.winding.normal_shift_smooth,
             'auto_margin_pct': self.shell.auto_margin_pct,
+            'shell_b0_marker': self.shell.b0_marker,
             'smooth_factor': self.winding.smooth_factor,
             'conductor_width_m': self.wire.conductor_width,
             'electrical_section_shape': 'circle',
@@ -643,6 +670,8 @@ class Config:
             'fasthenry_conductor_width_m': self.fasthenry_conductor_width,
             'fasthenry_conductor_height_m': self.fasthenry_conductor_height,
             'specific_conductivity_conductor_ohm_m': self.fasthenry.specific_conductivity,
+            'conductor_resistivity_ohm_m': self.fasthenry.resistivity_ohm_m,
+            'conductor_conductivity_S_per_m': self.fasthenry.conductivity_s_per_m,
         }
 
 
